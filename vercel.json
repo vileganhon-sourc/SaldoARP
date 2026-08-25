@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api-arp/(.*)",
+      "destination": "https://dadosabertos.compras.gov.br/$1"
+    },
+    {
+      "source": "/api-pncp/(.*)",
+      "destination": "https://pncp.gov.br/$1"
+    }
+  ]
+}

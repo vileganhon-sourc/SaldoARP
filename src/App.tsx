@@ -72,9 +72,30 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer style={{ marginTop: '4rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
-        <p>© {new Date().getFullYear()} SaldoARP - Controle Interno de Saldo de Registro de Preços.</p>
-        <p style={{ marginTop: '0.25rem' }}>Consumindo dados abertos da API oficial do Portal de Compras Governamentais do Brasil.</p>
+      <footer style={{
+        background: 'var(--bg-footer)',
+        color: '#ffffff',
+        padding: '2.5rem 3rem',
+        fontSize: '0.82rem',
+        fontFamily: 'var(--font-family)',
+        marginTop: '5rem',
+        borderTop: '4px solid var(--accent)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.25rem' }}>Controle de Saldos ARP</p>
+            <p style={{ opacity: 0.8 }}>Controle Interno de Saldo de Registro de Preços do Governo Federal.</p>
+            <p style={{ opacity: 0.6, fontSize: '0.75rem', marginTop: '0.5rem' }}>
+              © {new Date().getFullYear()} Controle de Saldos ARP. Desenvolvido para fins de transparência e eficiência pública.
+            </p>
+          </div>
+          <div style={{ textAlign: 'right', opacity: 0.8 }}>
+            <p style={{ fontWeight: 600 }}>Dados Abertos do Compras.gov.br</p>
+            <p style={{ fontSize: '0.78rem', marginTop: '0.2rem', opacity: 0.7 }}>
+              Consumindo dados em tempo real da API oficial do Portal de Compras Governamentais do Brasil.
+            </p>
+          </div>
+        </div>
       </footer>
     </div>
   );

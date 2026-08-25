@@ -108,3 +108,53 @@ export interface FilterParams {
   codigoUnidadeGerenciadora?: string;
   numeroAtaRegistroPreco?: string;
 }
+
+export interface EmpenhosSaldoItemResponse {
+  resultado: EmpenhoSaldoItemRecord[];
+  totalRegistros: number;
+  totalPaginas: number;
+  paginasRestantes: number;
+}
+
+export interface EmpenhoSaldoItemRecord {
+  numeroItem: string;
+  unidade: string;
+  tipo: string;
+  quantidadeRegistrada: number;
+  quantidadeEmpenhada: number;
+  saldoEmpenho: number;
+  dataHoraInclusao: string | null;
+  dataHoraAtualizacao: string;
+}
+
+export interface InternalAllocation {
+  id: string;
+  unitName: string;
+  allocatedQty: number;
+  empenhadaQty: number;
+}
+
+export interface PncpContract {
+  numeroContrato: string;
+  cnpj?: string;
+  anoContrato?: number;
+  sequencialContrato?: number;
+  objeto?: string;
+  valorInicial?: number;
+  nomeRazaoSocialFornecedor?: string;
+  niFornecedor?: string;
+  dataAssinatura?: string;
+  dataVigenciaInicial?: string;
+  dataVigenciaFinal?: string;
+  numeroControlePncp?: string;
+  valorTotalHomologado?: number;
+  receitaDespesa?: string;
+  tipoContrato?: string;
+}
+
+export interface PncpContractEmpenho {
+  numeroEmpenho: string;
+  valorTotal: number;
+  dataEmissaoEmpenho: string;
+  sequencialEmpenho: number;
+}

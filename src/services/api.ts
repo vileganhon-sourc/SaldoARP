@@ -1,6 +1,6 @@
-import type { ArpResponse, ArpItemsResponse, UnidadesItemResponse, FilterParams } from '../types';
+import type { ArpResponse, ArpItemsResponse, UnidadesItemResponse, FilterParams, ArpRecord, EmpenhosSaldoItemResponse, EmpenhoSaldoItemRecord, PncpContract, PncpContractEmpenho } from '../types';
 
-const BASE_URL = 'https://dadosabertos.compras.gov.br/modulo-arp';
+const BASE_URL = '/api-arp/modulo-arp';
 
 // ==================== MOCK DATA ====================
 // Realistic mock data parsed from Compras.gov.br ARP module
@@ -549,6 +549,77 @@ const MOCK_UNIDADES: Record<string, UnidadesItemResponse> = {
   }
 };
 
+const MOCK_EMPENHOS_SALDO: Record<string, EmpenhosSaldoItemResponse> = {
+  // Key format: "numeroAta-unidadeGerenciadora"
+  "00068/2024-200331": {
+    resultado: [
+      {
+        numeroItem: "00011",
+        unidade: "160230 - 15 COMPANHIA DE ENGENHARIA DE COMBATE",
+        tipo: "NÃO PARTICIPANTE",
+        quantidadeRegistrada: 5.0,
+        quantidadeEmpenhada: 10.0,
+        saldoEmpenho: -5.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      },
+      {
+        numeroItem: "00011",
+        unidade: "200331 - SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP",
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 89.0,
+        quantidadeEmpenhada: 178.0,
+        saldoEmpenho: -89.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      },
+      {
+        numeroItem: "00011",
+        unidade: "200334 - COORDENACAO GERAL DE ADMINISTRACAO CGAD/DLOG/",
+        tipo: "PARTICIPANTE",
+        quantidadeRegistrada: 146.0,
+        quantidadeEmpenhada: 292.0,
+        saldoEmpenho: -292.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      },
+      {
+        numeroItem: "00011",
+        unidade: "200352 - SUPERINTENDENCIA REGIONAL NO ESTADO DO ES",
+        tipo: "PARTICIPANTE",
+        quantidadeRegistrada: 6.0,
+        quantidadeEmpenhada: 12.0,
+        saldoEmpenho: -6.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      },
+      {
+        numeroItem: "00011",
+        unidade: "200384 - SUPERINTENDENCIA REGIONAL NO ESTADO DE RR",
+        tipo: "PARTICIPANTE",
+        quantidadeRegistrada: 10.0,
+        quantidadeEmpenhada: 20.0,
+        saldoEmpenho: -10.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      },
+      {
+        numeroItem: "00011",
+        unidade: "791580 - BASE ALMIRANTE CASTRO E SILVA",
+        tipo: "NÃO PARTICIPANTE",
+        quantidadeRegistrada: 10.0,
+        quantidadeEmpenhada: 20.0,
+        saldoEmpenho: -10.0,
+        dataHoraInclusao: null,
+        dataHoraAtualizacao: "2025-12-29T11:00:20"
+      }
+    ],
+    totalRegistros: 6,
+    totalPaginas: 1,
+    paginasRestantes: 0
+  }
+};
+
 // State flag to track whether we are in Simulation Mode (e.g. if fetch failed due to CORS)
 let isSimulationMode = false;
 
@@ -574,40 +645,97 @@ function buildQueryString(params: Record<string, string | number | undefined>): 
 }
 
 /**
+ * Splits a date range into chunks of at most 365 days to respect the Compras.gov API limit.
+ */
+function splitDateRange(startDateStr: string, endDateStr: string): { start: string; end: string }[] {
+  const start = new Date(startDateStr + 'T00:00:00Z');
+  const end = new Date(endDateStr + 'T00:00:00Z');
+  const chunks: { start: string; end: string }[] = [];
+  
+  let currentStart = new Date(start);
+  while (currentStart <= end) {
+    let currentEnd = new Date(currentStart);
+    currentEnd.setUTCDate(currentEnd.getUTCDate() + 364); // 365 days inclusive (currentStart + 364 days)
+    if (currentEnd > end) {
+      currentEnd = new Date(end);
+    }
+    
+    const format = (d: Date) => d.toISOString().split('T')[0];
+    chunks.push({
+      start: format(currentStart),
+      end: format(currentEnd)
+    });
+    
+    currentStart = new Date(currentEnd);
+    currentStart.setUTCDate(currentStart.getUTCDate() + 1);
+  }
+  return chunks;
+}
+
+/**
  * 1. Consultar ARP
  * Endereço: /modulo-arp/1_consultarARP
  */
 export async function fetchArps(params: FilterParams): Promise<ArpResponse> {
-  const queryParams = {
-    pagina: 1,
-    tamanhoPagina: 50,
-    codigoUnidadeGerenciadora: params.codigoUnidadeGerenciadora,
-    dataVigenciaInicialMin: params.dataVigenciaInicialMin,
-    dataVigenciaInicialMax: params.dataVigenciaInicialMax
-  };
-
-  const url = `${BASE_URL}/1_consultarARP${buildQueryString(queryParams)}`;
-
   if (isSimulationMode) {
     return filterMockArps(params);
   }
 
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const chunks = splitDateRange(params.dataVigenciaInicialMin, params.dataVigenciaInicialMax);
+    const allArpsMap = new Map<string, ArpRecord>();
+
+    for (const chunk of chunks) {
+      let currentPage = 1;
+      let hasMorePages = true;
+
+      while (hasMorePages) {
+        const queryParams = {
+          pagina: currentPage,
+          tamanhoPagina: 500, // Fetch 500 records per request to minimize network overhead
+          codigoUnidadeGerenciadora: params.codigoUnidadeGerenciadora,
+          dataVigenciaInicialMin: chunk.start,
+          dataVigenciaInicialMax: chunk.end
+        };
+
+        const url = `${BASE_URL}/1_consultarARP${buildQueryString(queryParams)}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json() as ArpResponse;
+
+        if (data.resultado && data.resultado.length > 0) {
+          for (const arp of data.resultado) {
+            // Apply client-side filter for numeroAta if provided
+            if (params.numeroAtaRegistroPreco && !arp.numeroAtaRegistroPreco.includes(params.numeroAtaRegistroPreco)) {
+              continue;
+            }
+            // Unique key to prevent duplicate items across range chunks
+            const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
+            allArpsMap.set(key, arp);
+          }
+        }
+
+        if (data.paginasRestantes && data.paginasRestantes > 0) {
+          currentPage++;
+        } else {
+          hasMorePages = false;
+        }
+      }
     }
-    const data = await response.json() as ArpResponse;
+
+    const mergedList = Array.from(allArpsMap.values());
     
-    // Apply client-side filter for numeroAta if provided
-    if (params.numeroAtaRegistroPreco && data.resultado) {
-      data.resultado = data.resultado.filter(arp => 
-        arp.numeroAtaRegistroPreco.includes(params.numeroAtaRegistroPreco!)
-      );
-      data.totalRegistros = data.resultado.length;
-    }
-    
-    return data;
+    // Sort by final validity date descending to display most recent/relevant ATAs first
+    mergedList.sort((a, b) => b.dataVigenciaFinal.localeCompare(a.dataVigenciaFinal));
+
+    return {
+      resultado: mergedList,
+      totalRegistros: mergedList.length,
+      totalPaginas: 1,
+      paginasRestantes: 0
+    };
   } catch (error) {
     console.warn("API request failed (possibly CORS or offline). Falling back to mock data.", error);
     isSimulationMode = true;
@@ -711,7 +839,7 @@ export async function fetchUnidadesItem(
   numeroItem: string
 ): Promise<UnidadesItemResponse> {
   // Ensure the numeroItem is padded or formatted as required by the API
-  const formattedItem = numeroItem.padStart(5, '0');
+  const formattedItem = (numeroItem || '').toString().padStart(5, '0');
   
   const queryParams = {
     pagina: 1,
@@ -780,4 +908,345 @@ function getMockUnidades(
     totalPaginas: 1,
     paginasRestantes: 0
   };
+}
+
+/**
+ * 4. Consultar Empenhos Saldo Item
+ * Endereço: /modulo-arp/4_consultarEmpenhosSaldoItem
+ */
+export async function fetchEmpenhosSaldoItem(
+  numeroAta: string,
+  unidadeGerenciadora: string
+): Promise<EmpenhosSaldoItemResponse> {
+  if (isSimulationMode) {
+    return getMockEmpenhosSaldoItem(numeroAta, unidadeGerenciadora);
+  }
+
+  try {
+    let currentPage = 1;
+    let hasMorePages = true;
+    const allRecords: EmpenhoSaldoItemRecord[] = [];
+
+    while (hasMorePages) {
+      const queryParams = {
+        pagina: currentPage,
+        tamanhoPagina: 500, // Fetch max 500 records to minimize network overhead
+        numeroAta,
+        unidadeGerenciadora
+      };
+
+      const url = `${BASE_URL}/4_consultarEmpenhosSaldoItem${buildQueryString(queryParams)}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json() as EmpenhosSaldoItemResponse;
+
+      if (data.resultado && data.resultado.length > 0) {
+        allRecords.push(...data.resultado);
+      }
+
+      if (data.paginasRestantes && data.paginasRestantes > 0) {
+        currentPage++;
+      } else {
+        hasMorePages = false;
+      }
+    }
+
+    return {
+      resultado: allRecords,
+      totalRegistros: allRecords.length,
+      totalPaginas: 1,
+      paginasRestantes: 0
+    };
+  } catch (error) {
+    console.warn("API request failed (possibly CORS). Falling back to mock data.", error);
+    isSimulationMode = true;
+    return getMockEmpenhosSaldoItem(numeroAta, unidadeGerenciadora);
+  }
+}
+
+function getMockEmpenhosSaldoItem(
+  numeroAta: string,
+  unidadeGerenciadora: string
+): EmpenhosSaldoItemResponse {
+  const key = `${numeroAta}-${unidadeGerenciadora}`;
+  const mockResult = MOCK_EMPENHOS_SALDO[key];
+  if (mockResult) {
+    return mockResult;
+  }
+
+  // Create a dynamic realistic mock if not found in MOCK_EMPENHOS_SALDO
+  // Allows any ATA details to load commitment breakdown cleanly in simulation
+  return {
+    resultado: [
+      {
+        numeroItem: "00001",
+        unidade: `${unidadeGerenciadora} - ÓRGÃO GERENCIADOR PRINCIPAL`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 100.0,
+        quantidadeEmpenhada: 45.0,
+        saldoEmpenho: 55.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00001",
+        unidade: "153051 - UNIVERSIDADE PARTICIPANTE S/A",
+        tipo: "PARTICIPANTE",
+        quantidadeRegistrada: 50.0,
+        quantidadeEmpenhada: 20.0,
+        saldoEmpenho: 30.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00026",
+        unidade: `${unidadeGerenciadora} - UNIVERSIDADE FEDERAL DE RORAIMA`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 2.0,
+        quantidadeEmpenhada: 1.0,
+        saldoEmpenho: 1.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00027",
+        unidade: `${unidadeGerenciadora} - UNIVERSIDADE FEDERAL DE RORAIMA`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 4.0,
+        quantidadeEmpenhada: 1.0,
+        saldoEmpenho: 3.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00028",
+        unidade: `${unidadeGerenciadora} - UNIVERSIDADE FEDERAL DE RORAIMA`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 3.0,
+        quantidadeEmpenhada: 1.0,
+        saldoEmpenho: 2.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00011",
+        unidade: `${unidadeGerenciadora} - ÓRGÃO DE SEGURANÇA NACIONAL`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 500.0,
+        quantidadeEmpenhada: 50.0,
+        saldoEmpenho: 450.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      },
+      {
+        numeroItem: "00012",
+        unidade: `${unidadeGerenciadora} - ÓRGÃO DE SEGURANÇA NACIONAL`,
+        tipo: "GERENCIADORA",
+        quantidadeRegistrada: 1940.0,
+        quantidadeEmpenhada: 940.0,
+        saldoEmpenho: 1000.0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString()
+      }
+    ],
+    totalRegistros: 7,
+    totalPaginas: 1,
+    paginasRestantes: 0
+  };
+}
+
+/**
+ * 5. Consultar Contratos da Ata no PNCP
+ * Endereço: /api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/atas/{sequencialAta}/contratos
+ */
+export async function fetchPncpContracts(
+  cnpj: string,
+  ano: string,
+  sequencial: string,
+  sequencialAta: string
+): Promise<PncpContract[]> {
+  const url = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${ano}/${sequencial}/atas/${sequencialAta}/contratos`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return [];
+    }
+    const data = await response.json();
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && Array.isArray(data.data)) {
+      return data.data;
+    }
+    return [];
+  } catch (error) {
+    console.warn("PNCP contracts API request failed. Returning mock contracts.", error);
+    return getMockPncpContracts(cnpj, ano, sequencial, sequencialAta);
+  }
+}
+
+function getMockPncpContracts(
+  cnpj: string,
+  ano: string,
+  sequencial: string,
+  sequencialAta: string
+): PncpContract[] {
+  // Mock contracts for SENASP ATA 00068/2024 (PNCP: 00394494000136-1-001130/2024-000017)
+  if (cnpj === "00394494000136" && ano === "2024" && sequencial === "1130" && sequencialAta === "17") {
+    return [
+      {
+        numeroContrato: "45/2025",
+        objeto: "Contrato para fornecimento de facas de mergulho e cintos de lastro para a Força Nacional.",
+        valorInicial: 45000.00,
+        nomeRazaoSocialFornecedor: "RBF DISTRIBUIDORA E SERVICOS LTDA",
+        niFornecedor: "11031398000140",
+        dataAssinatura: "2025-01-15",
+        dataVigenciaInicial: "2025-01-15",
+        dataVigenciaFinal: "2026-01-15",
+        numeroControlePncp: "00394494000136-1-000045/2025"
+      },
+      {
+        numeroContrato: "46/2025",
+        objeto: "Contrato complementar de equipamentos táticos para operações especiais.",
+        valorInicial: 12500.00,
+        nomeRazaoSocialFornecedor: "RBF DISTRIBUIDORA E SERVICOS LTDA",
+        niFornecedor: "11031398000140",
+        dataAssinatura: "2025-02-10",
+        dataVigenciaInicial: "2025-02-10",
+        dataVigenciaFinal: "2026-02-10",
+        numeroControlePncp: "00394494000136-1-000046/2025"
+      }
+    ];
+  }
+  
+  // Mock contracts for SENASP ATA 00051/2025 (PNCP: 34792077000163-1-000051/2025-000001)
+  if (cnpj === "34792077000163" && ano === "2025" && sequencial === "51" && sequencialAta === "1") {
+    return [
+      {
+        numeroContrato: "12/2026",
+        objeto: "Aquisição de equipamentos de mergulho para CGOE.",
+        valorInicial: 250000.00,
+        nomeRazaoSocialFornecedor: "ULTRAMAR USA",
+        niFornecedor: "ESTRANGEIRO_ULTRAMAR_USA",
+        dataAssinatura: "2026-02-05",
+        dataVigenciaInicial: "2026-02-05",
+        dataVigenciaFinal: "2027-02-04",
+        numeroControlePncp: "34792077000163-1-000012/2026"
+      }
+    ];
+  }
+
+  // Mock contracts for SENASP ATA 00039/2025 (PNCP: 00394494000136-1-001130/2024-000017 fallback in simulation)
+  if (cnpj === "200331" || (cnpj === "00394494000136" && ano === "2025" && sequencial === "39")) {
+    return [
+      {
+        numeroContrato: "03/2025",
+        objeto: "Contrato para fornecimento de material mergulho CGOE.",
+        valorInicial: 3500.00,
+        nomeRazaoSocialFornecedor: "RBF DISTRIBUIDORA E SERVICOS LTDA",
+        niFornecedor: "11031398000140",
+        dataAssinatura: "2025-02-15",
+        dataVigenciaInicial: "2025-02-15",
+        dataVigenciaFinal: "2026-02-15",
+        numeroControlePncp: "00394494000136-1-000003/2025"
+      }
+    ];
+  }
+
+  return [];
+}
+
+/**
+ * 6. Consultar Empenhos do Contrato no PNCP
+ * Endereço: /api/pncp/v1/orgaos/{cnpj}/contratos/{ano}/{sequencialContrato}/empenhos
+ */
+export async function fetchPncpContractEmpenhos(
+  cnpj: string,
+  ano: string,
+  sequencialContrato: string
+): Promise<PncpContractEmpenho[]> {
+  const url = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/contratos/${ano}/${sequencialContrato}/empenhos`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return [];
+    }
+    const data = await response.json();
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && Array.isArray(data.data)) {
+      return data.data;
+    }
+    return [];
+  } catch (error) {
+    console.warn("PNCP contract empenhos API request failed. Returning mock.", error);
+    return getMockPncpContractEmpenhos(cnpj, ano, sequencialContrato);
+  }
+}
+
+function getMockPncpContractEmpenhos(
+  cnpj: string,
+  ano: string,
+  sequencialContrato: string
+): PncpContractEmpenho[] {
+  // For Contract 45/2025 (sequencial 45)
+  if (cnpj === "00394494000136" && ano === "2025" && sequencialContrato === "45") {
+    return [
+      {
+        numeroEmpenho: "2025NE000123",
+        valorTotal: 30000.00,
+        dataEmissaoEmpenho: "2025-01-20T09:30:00",
+        sequencialEmpenho: 1
+      },
+      {
+        numeroEmpenho: "2025NE000124",
+        valorTotal: 15000.00,
+        dataEmissaoEmpenho: "2025-01-25T14:45:00",
+        sequencialEmpenho: 2
+      }
+    ];
+  }
+
+  // For Contract 46/2025 (sequencial 46)
+  if (cnpj === "00394494000136" && ano === "2025" && sequencialContrato === "46") {
+    return [
+      {
+        numeroEmpenho: "2025NE000215",
+        valorTotal: 12500.00,
+        dataEmissaoEmpenho: "2025-02-12T11:00:00",
+        sequencialEmpenho: 1
+      }
+    ];
+  }
+
+  // For Contract 12/2026 (sequencial 12)
+  if (cnpj === "34792077000163" && ano === "2026" && sequencialContrato === "12") {
+    return [
+      {
+        numeroEmpenho: "2026NE000088",
+        valorTotal: 250000.00,
+        dataEmissaoEmpenho: "2026-02-10T10:15:00",
+        sequencialEmpenho: 1
+      }
+    ];
+  }
+
+  // For Contract 03/2025 (sequencial 3)
+  if (cnpj === "00394494000136" && ano === "2025" && sequencialContrato === "3") {
+    return [
+      {
+        numeroEmpenho: "2025NE000099",
+        valorTotal: 3500.00,
+        dataEmissaoEmpenho: "2025-02-18T16:00:00",
+        sequencialEmpenho: 1
+      }
+    ];
+  }
+
+  return [];
 }
