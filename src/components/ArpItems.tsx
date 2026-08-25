@@ -35,6 +35,13 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
           );
         }
         
+        // Sort items in ascending numeric order by item number (1, 2, 3, ..., 11, 12, etc.)
+        filtered.sort((a, b) => {
+          const numA = parseInt(a.numeroItem, 10) || 0;
+          const numB = parseInt(b.numeroItem, 10) || 0;
+          return numA - numB;
+        });
+
         setItems(filtered);
         if (filtered.length === 0) {
           setError('Nenhum item localizado para esta Ata de Registro de Preços.');

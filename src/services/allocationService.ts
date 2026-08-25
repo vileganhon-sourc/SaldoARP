@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { InternalAllocation } from '../types';
 
-export async function fetchAllocations(itemKey: string, defaultAllocations: InternalAllocation[] = []): Promise<InternalAllocation[]> {
+export async function fetchAllocations(itemKey: string): Promise<InternalAllocation[]> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
@@ -9,19 +9,13 @@ export async function fetchAllocations(itemKey: string, defaultAllocations: Inte
         .select('*')
         .eq('item_key', itemKey);
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data.map((d: any) => ({
           id: d.id,
           unitName: d.unit_name,
-          allocatedQty: d.allocated_qty,
-          empenhadaQty: d.empenhada_qty || 0
+          allocatedQty: Number(d.allocated_qty),
+          empenhadaQty: Number(d.empenhada_qty) || 0
         }));
-      }
-
-      // If empty in Supabase, insert defaults if provided
-      if (!error && data && data.length === 0 && defaultAllocations.length > 0) {
-        await saveAllocations(itemKey, defaultAllocations);
-        return defaultAllocations;
       }
     } catch (e) {
       console.warn('Erro ao conectar com Supabase (allocations), utilizando localStorage como fallback.', e);
@@ -34,15 +28,12 @@ export async function fetchAllocations(itemKey: string, defaultAllocations: Inte
     const stored = localStorage.getItem(key);
     if (stored) {
       return JSON.parse(stored);
-    } else if (defaultAllocations.length > 0) {
-      localStorage.setItem(key, JSON.stringify(defaultAllocations));
-      return defaultAllocations;
     }
   } catch (e) {
     console.error('Erro no fallback do localStorage', e);
   }
 
-  return defaultAllocations;
+  return [];
 }
 
 export async function saveAllocations(itemKey: string, allocations: InternalAllocation[]): Promise<void> {
@@ -75,7 +66,7 @@ export async function saveAllocations(itemKey: string, allocations: InternalAllo
   }
 }
 
-export async function fetchEmpenhoLinks(itemKey: string, defaultLinks: Record<string, string> = {}): Promise<Record<string, string>> {
+export async function fetchEmpenhoLinks(itemKey: string): Promise<Record<string, string>> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
@@ -83,17 +74,12 @@ export async function fetchEmpenhoLinks(itemKey: string, defaultLinks: Record<st
         .select('*')
         .eq('item_key', itemKey);
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         const map: Record<string, string> = {};
         data.forEach((d: any) => {
           map[d.empenho_numero] = d.allocation_id;
         });
         return map;
-      }
-      
-      if (!error && data && data.length === 0 && Object.keys(defaultLinks).length > 0) {
-        await saveEmpenhoLinks(itemKey, defaultLinks);
-        return defaultLinks;
       }
     } catch (e) {
       console.warn('Erro ao carregar vínculos de empenhos do Supabase', e);
@@ -106,15 +92,12 @@ export async function fetchEmpenhoLinks(itemKey: string, defaultLinks: Record<st
     const stored = localStorage.getItem(key);
     if (stored) {
       return JSON.parse(stored);
-    } else if (Object.keys(defaultLinks).length > 0) {
-      localStorage.setItem(key, JSON.stringify(defaultLinks));
-      return defaultLinks;
     }
   } catch (e) {
     console.error('Erro no fallback do localStorage (empenho links)', e);
   }
 
-  return defaultLinks;
+  return {};
 }
 
 export async function saveEmpenhoLinks(itemKey: string, links: Record<string, string>): Promise<void> {

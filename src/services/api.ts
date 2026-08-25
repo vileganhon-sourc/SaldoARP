@@ -798,6 +798,7 @@ export async function fetchArpItems(
       data.resultado = data.resultado.filter(item => 
         item.numeroAtaRegistroPreco === numeroAtaRegistroPreco
       );
+      data.resultado.sort((a, b) => (parseInt(a.numeroItem, 10) || 0) - (parseInt(b.numeroItem, 10) || 0));
       data.totalRegistros = data.resultado.length;
     }
     return data;
@@ -821,6 +822,7 @@ function filterMockItems(
   }
 
   const filtered = mockBatch.resultado.filter(item => item.numeroAtaRegistroPreco === numeroAtaRegistroPreco);
+  filtered.sort((a, b) => (parseInt(a.numeroItem, 10) || 0) - (parseInt(b.numeroItem, 10) || 0));
   return {
     resultado: filtered,
     totalRegistros: filtered.length,

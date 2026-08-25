@@ -221,26 +221,13 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const loadAllocations = async () => {
     setAllocationError(null);
     const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
-    const defaultAllocations: InternalAllocation[] = arp.codigoUnidadeGerenciadora === '200331' 
-      ? [
-          { id: '1', unitName: 'Coordenação-Geral de Operações Especiais (CGOE)', allocatedQty: 40, empenhadaQty: 0 },
-          { id: '2', unitName: 'Diretoria da Força Nacional de Segurança Pública (DFN)', allocatedQty: 30, empenhadaQty: 0 },
-          { id: '3', unitName: 'Assessoria de Inteligência (ASSIN)', allocatedQty: 10, empenhadaQty: 0 }
-        ]
-      : [
-          { id: '1', unitName: 'Departamento de Administração e Finanças (DAF)', allocatedQty: 25, empenhadaQty: 0 },
-          { id: '2', unitName: 'Coordenação de Tecnologia da Informação (CTI)', allocatedQty: 15, empenhadaQty: 0 }
-        ];
-    const data = await fetchAllocations(itemKey, defaultAllocations);
+    const data = await fetchAllocations(itemKey);
     setAllocations(data);
   };
 
   const loadEmpenhoLinks = async () => {
     const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
-    const defaultLinks: Record<string, string> = arp.codigoUnidadeGerenciadora === '200331'
-      ? { "200331 - SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP": "2" }
-      : {};
-    const links = await fetchEmpenhoLinks(itemKey, defaultLinks);
+    const links = await fetchEmpenhoLinks(itemKey);
     setEmpenhoLinks(links);
   };
 
