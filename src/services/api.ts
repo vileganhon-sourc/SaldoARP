@@ -1,4 +1,5 @@
 import type { ArpResponse, ArpItemsResponse, UnidadesItemResponse, FilterParams, ArpRecord, EmpenhosSaldoItemResponse, EmpenhoSaldoItemRecord, PncpContract, PncpContractEmpenho } from '../types';
+import { cacheArpsInDb, cacheArpItemsInDb } from './dbCacheService';
 
 const BASE_URL = '/api-arp/modulo-arp';
 
@@ -730,6 +731,9 @@ export async function fetchArps(params: FilterParams): Promise<ArpResponse> {
     // Sort by final validity date descending to display most recent/relevant ATAs first
     mergedList.sort((a, b) => b.dataVigenciaFinal.localeCompare(a.dataVigenciaFinal));
 
+    // Cache records into Supabase DB asynchronously
+    cacheArpsInDb(mergedList);
+
     return {
       resultado: mergedList,
       totalRegistros: mergedList.length,
@@ -739,7 +743,9 @@ export async function fetchArps(params: FilterParams): Promise<ArpResponse> {
   } catch (error) {
     console.warn("API request failed (possibly CORS or offline). Falling back to mock data.", error);
     isSimulationMode = true;
-    return filterMockArps(params);
+    const mockRes = filterMockArps(params);
+    cacheArpsInDb(mockRes.resultado);
+    return mockRes;
   }
 }
 
@@ -800,12 +806,15 @@ export async function fetchArpItems(
       );
       data.resultado.sort((a, b) => (parseInt(a.numeroItem, 10) || 0) - (parseInt(b.numeroItem, 10) || 0));
       data.totalRegistros = data.resultado.length;
+      cacheArpItemsInDb(numeroAtaRegistroPreco, codigoUnidadeGerenciadora, data.resultado);
     }
     return data;
   } catch (error) {
     console.warn("API request failed (possibly CORS). Falling back to mock data.", error);
     isSimulationMode = true;
-    return filterMockItems(codigoUnidadeGerenciadora, dataVigenciaInicial, numeroAtaRegistroPreco);
+    const mockRes = filterMockItems(codigoUnidadeGerenciadora, dataVigenciaInicial, numeroAtaRegistroPreco);
+    cacheArpItemsInDb(numeroAtaRegistroPreco, codigoUnidadeGerenciadora, mockRes.resultado);
+    return mockRes;
   }
 }
 

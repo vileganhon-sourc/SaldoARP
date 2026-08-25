@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { ArpSearch } from './components/ArpSearch';
 import { ArpItems } from './components/ArpItems';
 import { ItemBalances } from './components/ItemBalances';
+import { SeiManagementModal } from './components/SeiManagementModal';
 import type { ArpRecord, ArpItemRecord } from './types';
 
 type ViewState = 'search' | 'items' | 'balances';
@@ -11,6 +12,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('search');
   const [selectedArp, setSelectedArp] = useState<ArpRecord | null>(null);
   const [selectedItem, setSelectedItem] = useState<ArpItemRecord | null>(null);
+  const [isSeiModalOpen, setIsSeiModalOpen] = useState<boolean>(false);
 
   const handleSelectArp = (arp: ArpRecord) => {
     setSelectedArp(arp);
@@ -35,7 +37,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      <Header />
+      <Header onOpenSeiModal={() => setIsSeiModalOpen(true)} />
 
       <main>
         {view === 'search' && (
@@ -60,6 +62,11 @@ const App: React.FC = () => {
           />
         )}
       </main>
+
+      <SeiManagementModal 
+        isOpen={isSeiModalOpen} 
+        onClose={() => setIsSeiModalOpen(false)} 
+      />
 
       <footer style={{
         background: 'var(--bg-footer)',
@@ -91,3 +98,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+

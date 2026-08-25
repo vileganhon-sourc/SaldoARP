@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, HelpCircle, ShoppingBag, Eye, Users, Award, ExternalLink, DollarSign } from 'lucide-react';
+import { ChevronLeft, HelpCircle, ShoppingBag, Eye, Users, Award, ExternalLink, DollarSign, RefreshCw } from 'lucide-react';
 import { fetchArpItems } from '../services/api';
 import type { ArpRecord, ArpItemRecord } from '../types';
 
@@ -12,49 +12,59 @@ interface ArpItemsProps {
 export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack }) => {
   const [items, setItems] = useState<ArpItemRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadItems = async () => {
+  const loadItemsData = async (forceSync = false) => {
+    if (forceSync) {
+      setIsSyncing(true);
+    } else {
       setLoading(true);
-      setError(null);
-      try {
-        const data = await fetchArpItems(
-          arp.dataVigenciaInicial,
-          arp.codigoUnidadeGerenciadora,
-          arp.numeroAtaRegistroPreco
+    }
+    setError(null);
+    try {
+      const data = await fetchArpItems(
+        arp.dataVigenciaInicial,
+        arp.codigoUnidadeGerenciadora,
+        arp.numeroAtaRegistroPreco
+      );
+      
+      let filtered = data.resultado || [];
+      
+      if (arp.numeroControlePncpAta) {
+        filtered = filtered.filter(item => 
+          !item.numeroControlePncpAta || item.numeroControlePncpAta === arp.numeroControlePncpAta
         );
-        
-        let filtered = data.resultado || [];
-        
-        // Filter items to match the exact parent ATA's PNCP control number
-        // This separates active items from cancelled items of the same ATA number!
-        if (arp.numeroControlePncpAta) {
-          filtered = filtered.filter(item => 
-            !item.numeroControlePncpAta || item.numeroControlePncpAta === arp.numeroControlePncpAta
-          );
-        }
-        
-        // Sort items in ascending numeric order by item number (1, 2, 3, ..., 11, 12, etc.)
-        filtered.sort((a, b) => {
-          const numA = parseInt(a.numeroItem, 10) || 0;
-          const numB = parseInt(b.numeroItem, 10) || 0;
-          return numA - numB;
-        });
-
-        setItems(filtered);
-        if (filtered.length === 0) {
-          setError('Nenhum item localizado para esta Ata de Registro de Preços.');
-        }
-      } catch (err: any) {
-        setError(err.message || 'Falha ao buscar os itens da Ata.');
-      } finally {
-        setLoading(false);
       }
-    };
+      
+      filtered.sort((a, b) => {
+        const numA = parseInt(a.numeroItem, 10) || 0;
+        const numB = parseInt(b.numeroItem, 10) || 0;
+        return numA - numB;
+      });
 
-    loadItems();
+      setItems(filtered);
+      const nowTime = new Date().toLocaleTimeString('pt-BR');
+      setSyncStatus(`Dados sincronizados com o Compras.gov/PNCP às ${nowTime}`);
+      if (filtered.length === 0) {
+        setError('Nenhum item localizado para esta Ata de Registro de Preços.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Falha ao buscar os itens da Ata.');
+    } finally {
+      setLoading(false);
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadItemsData(false);
   }, [arp]);
+
+  const handleManualSyncClick = () => {
+    loadItemsData(true);
+  };
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
@@ -120,17 +130,42 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
       <section className="glass-card" style={{ background: 'linear-gradient(135deg, #f0f5fc 0%, #e1ebf8 100%)', borderColor: '#b2cbe6' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
               <span className="badge badge-info">Ata nº {arp.numeroAtaRegistroPreco}</span>
               <span className="badge badge-success">UASG Gerenciadora: {arp.codigoUnidadeGerenciadora}</span>
+              {syncStatus && (
+                <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #86efac', fontSize: '0.75rem' }}>
+                  ✓ {syncStatus}
+                </span>
+              )}
             </div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>
               {arp.nomeUnidadeGerenciadora}
             </h2>
           </div>
-          <button onClick={onBack} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
-            <ChevronLeft size={16} /> Voltar à busca
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button
+              onClick={handleManualSyncClick}
+              disabled={isSyncing}
+              className="btn btn-primary"
+              style={{
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.82rem',
+                backgroundColor: '#0284c7',
+                borderColor: '#0284c7',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }}
+            >
+              <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar com API'}
+            </button>
+
+            <button onClick={onBack} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
+              <ChevronLeft size={16} /> Voltar à busca
+            </button>
+          </div>
         </div>
 
         {/* Re-organized metadata layout */}

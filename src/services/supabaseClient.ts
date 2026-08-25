@@ -26,3 +26,62 @@ export interface DbEmpenhoLink {
   allocation_id: string;
   created_at?: string;
 }
+
+export interface DbAta {
+  id: string;
+  numero_ata: string;
+  codigo_uasg: string;
+  nome_uasg?: string;
+  ano_compra?: string;
+  numero_compra?: string;
+  modalidade?: string;
+  objeto?: string;
+  valor_total?: number;
+  data_vigencia_inicial?: string;
+  data_vigencia_final?: string;
+  status_ata?: string;
+  numero_controle_pncp?: string;
+  data_hora_atualizacao_api?: string;
+  ultimo_sync_em?: string;
+}
+
+export interface DbProcessoSei {
+  id: string;
+  numero_processo_sei: string;
+  descricao_objeto?: string;
+  unidade_requisitante?: string;
+  responsavel_nome?: string;
+  status_processo?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DbItemAta {
+  id: string;
+  ata_id: string;
+  numero_item: string;
+  codigo_pdm?: number;
+  descricao_item?: string;
+  fornecedor_cnpj_cpf?: string;
+  fornecedor_razao_social?: string;
+  quantidade_homologada?: number;
+  valor_unitario?: number;
+  valor_total?: number;
+  maximo_adesao?: number;
+  ultimo_sync_em?: string;
+}
+
+export interface DbAlocacaoInterna {
+  id: string;
+  item_id: string;
+  processo_sei_id?: string;
+  unidade_nome: string;
+  quantidade_alocada: number;
+  quantidade_empenhada: number;
+  numero_empenho?: string;
+  data_empenho?: string;
+  observacoes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+

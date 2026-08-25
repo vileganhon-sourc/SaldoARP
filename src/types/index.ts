@@ -158,3 +158,30 @@ export interface PncpContractEmpenho {
   dataEmissaoEmpenho: string;
   sequencialEmpenho: number;
 }
+
+export interface ProcessoSei {
+  id: string;
+  numeroProcessoSei: string;
+  descricaoObjeto?: string;
+  unidadeRequisitante?: string;
+  responsavelNome?: string;
+  statusProcesso?: 'Em Instrução' | 'Aprovado' | 'Empenhado' | 'Concluído';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SyncMetadata {
+  isCachedInDb: boolean;
+  ultimoSyncEm?: string;
+  dataHoraAtualizacaoApi?: string;
+  divergenciaDetectada?: boolean;
+}
+
+export interface ExtendedInternalAllocation extends InternalAllocation {
+  processoSeiId?: string;
+  numeroProcessoSei?: string;
+  numeroEmpenho?: string;
+  dataEmpenho?: string;
+  observacoes?: string;
+}
+

@@ -1,9 +1,11 @@
 import React from 'react';
-import { Wifi } from 'lucide-react';
+import { Wifi, Database, FileText } from 'lucide-react';
 
-interface HeaderProps {}
+interface HeaderProps {
+  onOpenSeiModal?: () => void;
+}
 
-export const Header: React.FC<HeaderProps> = () => {
+export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Gov.br Federal Identity Topbar */}
@@ -38,7 +40,7 @@ export const Header: React.FC<HeaderProps> = () => {
       <header style={{
         background: '#ffffff',
         borderBottom: '2px solid #1351b4',
-        padding: '1.5rem 3rem',
+        padding: '1.25rem 3rem',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -73,12 +75,39 @@ export const Header: React.FC<HeaderProps> = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span className="badge badge-success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px' }}>
-            <Wifi size={14} style={{ marginRight: '4px' }} /> API Conectada (Real)
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {onOpenSeiModal && (
+            <button
+              onClick={onOpenSeiModal}
+              style={{
+                backgroundColor: '#1351b4',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.45rem 0.9rem',
+                borderRadius: '6px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+              }}
+            >
+              <FileText size={15} color="#00cc55" /> Processos SEI
+            </button>
+          )}
+
+          <span className="badge badge-success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Database size={14} color="#10b981" /> Cache Banco (Ativo)
+          </span>
+
+          <span className="badge badge-success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Wifi size={14} /> API Conectada
           </span>
         </div>
       </header>
     </div>
   );
 };
+
