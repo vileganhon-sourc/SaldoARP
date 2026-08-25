@@ -5,7 +5,6 @@ import type { ArpRecord, FilterParams } from '../types';
 
 interface ArpSearchProps {
   onSelectArp: (arp: ArpRecord) => void;
-  simulationMode: boolean;
 }
 
 const DEFAULT_ITEM_PRICES: Record<string, number> = {
@@ -17,7 +16,7 @@ const DEFAULT_ITEM_PRICES: Record<string, number> = {
   '00005': 1500.00
 };
 
-export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, simulationMode }) => {
+export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
   const [params, setParams] = useState<FilterParams>({
     dataVigenciaInicialMin: '2024-01-01',
     dataVigenciaInicialMax: '2028-08-21',
@@ -57,10 +56,10 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, simulationMod
     }
   };
 
-  // Automatically trigger search on mount to load initial demo list
+  // Automatically trigger search on mount to load initial list
   useEffect(() => {
     handleSearch();
-  }, [simulationMode]);
+  }, []);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);

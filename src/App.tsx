@@ -4,7 +4,6 @@ import { ArpSearch } from './components/ArpSearch';
 import { ArpItems } from './components/ArpItems';
 import { ItemBalances } from './components/ItemBalances';
 import type { ArpRecord, ArpItemRecord } from './types';
-import { setSimulationMode } from './services/api';
 
 type ViewState = 'search' | 'items' | 'balances';
 
@@ -12,12 +11,6 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('search');
   const [selectedArp, setSelectedArp] = useState<ArpRecord | null>(null);
   const [selectedItem, setSelectedItem] = useState<ArpItemRecord | null>(null);
-  const [simulationMode, setSimMode] = useState<boolean>(true); // Default to true for smooth local experience
-
-  // Sync state to api service
-  React.useEffect(() => {
-    setSimulationMode(simulationMode);
-  }, [simulationMode]);
 
   const handleSelectArp = (arp: ArpRecord) => {
     setSelectedArp(arp);
@@ -42,16 +35,12 @@ const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      <Header 
-        simulationMode={simulationMode} 
-        onSimulationModeToggle={setSimMode} 
-      />
+      <Header />
 
       <main>
         {view === 'search' && (
           <ArpSearch 
             onSelectArp={handleSelectArp} 
-            simulationMode={simulationMode}
           />
         )}
 
