@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Calendar, FileText, Building2, ChevronRight, HelpCircle, DollarSign, Users, TrendingUp, BarChart2 } from 'lucide-react';
 import { fetchArps } from '../services/api';
+import { fetchAtasWithEmpenhosSet } from '../services/dbCacheService';
 import type { ArpRecord, FilterParams } from '../types';
 
 interface ArpSearchProps {
@@ -30,8 +31,18 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
   const [filterStatusAta, setFilterStatusAta] = useState<string>('TODAS');
 
   const [arps, setArps] = useState<ArpRecord[]>([]);
+  const [empenhosDbSet, setEmpenhosDbSet] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const loadEmpenhosDbSet = async () => {
+    try {
+      const set = await fetchAtasWithEmpenhosSet();
+      setEmpenhosDbSet(set);
+    } catch (e) {
+      console.warn('Erro ao carregar Atas com Empenhos do DB', e);
+    }
+  };
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -58,6 +69,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   // Automatically trigger search on mount to load initial list
   useEffect(() => {
+    loadEmpenhosDbSet();
     handleSearch();
   }, []);
 
@@ -103,10 +115,10 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
     return arp.valorTotal * 0.42;
   };
 
-  // Helper to check allocations and empenho links in localStorage for indicators
+  // Helper to check allocations and empenho links in Supabase and localStorage for indicators
   const checkAtaStatus = (numeroAta: string, uasg: string) => {
     let hasAllocations = false;
-    let hasEmpenhos = false;
+    let hasEmpenhos = empenhosDbSet.has(`${numeroAta}-${uasg}`);
 
     // Simulation/demo defaults for SENASP key ATAs
     if (uasg === '200331' && (numeroAta === '00068/2024' || numeroAta === '00051/2025')) {

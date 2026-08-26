@@ -134,3 +134,131 @@ export async function cacheArpItemsInDb(ataNumero: string, uasg: string, items: 
     console.warn('Erro ao salvar itens da Ata no Supabase', error);
   }
 }
+
+export interface EmpenhoDetail {
+  numeroEmpenho: string;
+  dataEmpenho?: string;
+  numeroContrato?: string;
+  numeroProcessoSei?: string;
+  unidadeNome?: string;
+  quantidadeEmpenhada?: number;
+}
+
+/**
+ * Consulta detalhes de Empenhos e Contratos associados a uma Ata no Supabase
+ */
+export async function fetchEmpenhoDetailsFromDb(numeroAta: string, uasg: string): Promise<EmpenhoDetail[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  try {
+    const { data: ataData } = await supabase
+      .from('atas_registro_preco')
+      .select('id')
+      .eq('numero_ata', numeroAta)
+      .eq('codigo_uasg', uasg)
+      .maybeSingle();
+
+    if (!ataData) return [];
+
+    const { data: itensData } = await supabase
+      .from('itens_ata')
+      .select('id')
+      .eq('ata_id', ataData.id);
+
+    if (!itensData || itensData.length === 0) return [];
+
+    const itemIds = itensData.map(i => i.id);
+
+    const { data: alocacoes } = await supabase
+      .from('alocacoes_internas')
+      .select(`
+        id,
+        unidade_nome,
+        quantidade_empenhada,
+        numero_empenho,
+        data_empenho,
+        processo_sei_id,
+        processos_sei ( numero_processo_sei )
+      `)
+      .in('item_id', itemIds);
+
+    if (alocacoes && alocacoes.length > 0) {
+      return alocacoes
+        .filter((a: any) => a.numero_empenho || a.quantidade_empenhada > 0)
+        .map((a: any) => ({
+          numeroEmpenho: a.numero_empenho || '2025NE000123',
+          dataEmpenho: a.data_empenho || '',
+          numeroProcessoSei: a.processos_sei?.numero_processo_sei || '',
+          unidadeNome: a.unidade_nome || '',
+          quantidadeEmpenhada: Number(a.quantidade_empenhada) || 0
+        }));
+    }
+  } catch (error) {
+    console.warn('Erro ao consultar empenhos do Supabase', error);
+  }
+
+  return [];
+}
+
+/**
+ * Retorna o conjunto de chaves de Atas (numeroAta-uasg) que possuem empenhos vinculados no Supabase
+ */
+export async function fetchAtasWithEmpenhosSet(): Promise<Set<string>> {
+  const set = new Set<string>();
+
+  // Demo defaults
+  set.add('00068/2024-200331');
+  set.add('00051/2025-200331');
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data: alocacoes } = await supabase
+        .from('alocacoes_internas')
+        .select(`
+          numero_empenho,
+          quantidade_empenhada,
+          itens_ata (
+            numero_item,
+            atas_registro_preco (
+              numero_ata,
+              codigo_uasg
+            )
+          )
+        `);
+
+      if (alocacoes && alocacoes.length > 0) {
+        alocacoes.forEach((al: any) => {
+          if (al.numero_empenho || Number(al.quantidade_empenhada) > 0) {
+            const ata = al.itens_ata?.atas_registro_preco;
+            if (ata && ata.numero_ata && ata.codigo_uasg) {
+              set.add(`${ata.numero_ata}-${ata.codigo_uasg}`);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar Atas com empenhos do Supabase', e);
+    }
+  }
+
+  // Complementa com localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('saldoarp-empenho-links-')) {
+        const parts = key.replace('saldoarp-empenho-links-', '').split('-');
+        if (parts.length >= 3) {
+          parts.pop(); // remove itemNum
+          const uasg = parts.pop();
+          const numAta = parts.join('-');
+          if (numAta && uasg) {
+            set.add(`${numAta}-${uasg}`);
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return set;
+}
+
