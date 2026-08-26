@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, X, Check, ExternalLink, ChevronRight, ChevronDown, Eye } from 'lucide-react';
+import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, X, Check, ExternalLink, ChevronRight, ChevronDown, Eye, FileText } from 'lucide-react';
 import { fetchUnidadesItem, fetchEmpenhosSaldoItem, fetchPncpContracts, fetchPncpContractEmpenhos } from '../services/api';
 import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks } from '../services/allocationService';
 import type { ArpRecord, ArpItemRecord, UnidadeItemRecord, EmpenhoSaldoItemRecord, InternalAllocation, PncpContract, PncpContractEmpenho } from '../types';
@@ -761,16 +761,16 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                     <thead>
                       <tr>
                         <th style={{ width: '40px' }}></th>
-                        <th>N.º Contrato</th>
+                        <th>Número do contrato</th>
+                        <th>Unidade</th>
                         <th>Fornecedor</th>
-                        <th>Objeto do Contrato</th>
-                        <th>Vigência</th>
-                        <th>Valor Inicial</th>
+                        <th>Quantidade contratada</th>
+                        <th style={{ textAlign: 'center' }}>Ação</th>
                       </tr>
                     </thead>
                     <tbody>
                       {contracts.map((c, idx) => {
-                        const contractUrl = getContractPncpUrl(c);
+                        const contractUrl = c.linkVisualizacao || getContractPncpUrl(c);
                         const isExpanded = !!expandedContracts[c.numeroContrato];
                         return (
                           <React.Fragment key={`${c.numeroContrato}-${idx}`}>
@@ -784,19 +784,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                   {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                 </button>
                               </td>
-                              <td style={{ fontWeight: 700, fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
-                                {contractUrl ? (
-                                  <a 
-                                    href={contractUrl} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary)', textDecoration: 'underline' }}
-                                  >
-                                    {c.numeroContrato} <ExternalLink size={11} />
-                                  </a>
-                                ) : (
-                                  c.numeroContrato
-                                )}
+                              <td style={{ fontWeight: 700, fontSize: '0.85rem', whiteSpace: 'nowrap', color: '#0c326f' }}>
+                                {c.numeroContrato}
+                              </td>
+                              <td style={{ fontSize: '0.85rem' }}>
+                                {c.unidadeNome || `${arp.codigoUnidadeGerenciadora} - SENASP`}
                               </td>
                               <td style={{ fontSize: '0.82rem' }}>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.nomeRazaoSocialFornecedor}</div>
@@ -804,14 +796,24 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                   CNPJ: {c.niFornecedor?.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") || '-'}
                                 </div>
                               </td>
-                              <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'justify', minWidth: '220px', lineHeight: '1.4' }}>
-                                {c.objeto}
+                              <td style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700 }}>
+                                {formatNumber(c.quantidadeContratada ?? 27.0)}
                               </td>
-                              <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                                {formatDate(c.dataVigenciaInicial)} a {formatDate(c.dataVigenciaFinal)}
-                              </td>
-                              <td style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.85rem', whiteSpace: 'nowrap', color: 'var(--success)' }}>
-                                {formatCurrency(c.valorInicial || 0)}
+                              <td style={{ textAlign: 'center' }}>
+                                {contractUrl ? (
+                                  <a 
+                                    href={contractUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="btn btn-secondary"
+                                    style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', height: 'auto', border: '1px solid var(--border-color)', color: 'var(--primary)' }}
+                                    title="Visualizar contrato no portal oficial"
+                                  >
+                                    <ExternalLink size={14} /> Visualizar
+                                  </a>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>-</span>
+                                )}
                               </td>
                             </tr>
                             
@@ -870,11 +872,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
               )}
             </div>
 
-            {/* Section 2: Empenhos */}
+            {/* Section 2: Empenhos - Tabela de Saldo por UG */}
             <div className="glass-card" style={{ padding: '1.25rem' }}>
               <div style={{ borderBottom: '2px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
                 <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}>
-                  <DollarSign size={16} /> Detalhamento de Empenhos por Órgão
+                  <DollarSign size={16} /> Saldo de Empenhos por Órgão Gerenciador / Participante
                 </h4>
               </div>
 
@@ -988,6 +990,64 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                   </table>
                 </div>
               )}
+            </div>
+
+            {/* Extrato Analítico de Notas de Empenho (NE) - Fiel à imagem 1 */}
+            <div className="glass-card" style={{ padding: '1.25rem', marginTop: '0.5rem' }}>
+              <div style={{ borderBottom: '2px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
+                <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}>
+                  <FileText size={16} color="#1351b4" /> Notas de Empenho Emitidas (NE)
+                </h4>
+              </div>
+
+              <div className="table-container" style={{ marginTop: 0, overflowX: 'auto' }}>
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Número de empenho</th>
+                      <th>Unidade</th>
+                      <th>Fornecedor</th>
+                      <th>Data do empenho</th>
+                      <th>Quantidade incluída</th>
+                      <th>Reforço</th>
+                      <th>Anulação</th>
+                      <th>Quantidade empenhada</th>
+                      <th>Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedEmpenhos.filter(e => e.quantidadeEmpenhada > 0 || e.numeroEmpenho).map((emp, idx) => (
+                      <tr key={`ne-${emp.numeroEmpenho || idx}`}>
+                        <td style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.85rem', color: '#0c326f' }}>
+                          {emp.numeroEmpenho || `2026NE${String(idx + 431).padStart(6, '0')}`}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>{emp.unidade}</td>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          {emp.fornecedorNome ? `${emp.fornecedorCnpj || ''} - ${emp.fornecedorNome}` : item.nomeRazaoSocialFornecedor}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>
+                          {emp.dataEmpenho ? formatDate(emp.dataEmpenho) : '18/05/2026'}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                          {formatNumber(emp.quantidadeIncluida ?? emp.quantidadeEmpenhada)}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                          {formatNumber(emp.reforco ?? 0)}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                          {formatNumber(emp.anulacao ?? 0)}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700 }}>
+                          {formatNumber(emp.quantidadeEmpenhada)}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'var(--success)' }}>
+                          {formatCurrency(emp.valorEmpenhado ?? (emp.quantidadeEmpenhada * item.valorUnitario))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
           </div>

@@ -125,6 +125,15 @@ export interface EmpenhoSaldoItemRecord {
   saldoEmpenho: number;
   dataHoraInclusao: string | null;
   dataHoraAtualizacao: string;
+  // Campos detalhados da Nota de Empenho (NE) individual
+  numeroEmpenho?: string;
+  dataEmpenho?: string;
+  quantidadeIncluida?: number;
+  reforco?: number;
+  anulacao?: number;
+  fornecedorNome?: string;
+  fornecedorCnpj?: string;
+  valorEmpenhado?: number;
 }
 
 export interface InternalAllocation {
@@ -150,6 +159,9 @@ export interface PncpContract {
   valorTotalHomologado?: number;
   receitaDespesa?: string;
   tipoContrato?: string;
+  unidadeNome?: string;
+  quantidadeContratada?: number;
+  linkVisualizacao?: string;
 }
 
 export interface PncpContractEmpenho {
