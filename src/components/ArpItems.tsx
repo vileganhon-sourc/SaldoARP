@@ -88,14 +88,6 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
     let hasAllocations = false;
     let hasEmpenhos = false;
 
-    // Simulation/demo defaults for SENASP key items
-    if (arp.codigoUnidadeGerenciadora === '200331' && 
-        (arp.numeroAtaRegistroPreco === '00068/2024' || arp.numeroAtaRegistroPreco === '00051/2025') && 
-        numeroItem === '00011') {
-      hasAllocations = true;
-      hasEmpenhos = true;
-    }
-
     try {
       const allocKey = `saldoarp-allocations-${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${numeroItem}`;
       const allocData = JSON.parse(localStorage.getItem(allocKey) || '[]');

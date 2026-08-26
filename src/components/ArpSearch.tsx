@@ -8,15 +8,6 @@ interface ArpSearchProps {
   onSelectArp: (arp: ArpRecord) => void;
 }
 
-const DEFAULT_ITEM_PRICES: Record<string, number> = {
-  '00011': 56.40, // Item 11 price
-  '00001': 120.00,
-  '00002': 2500.00,
-  '00003': 380.00,
-  '00004': 95.00,
-  '00005': 1500.00
-};
-
 export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
   const [params, setParams] = useState<FilterParams>({
     dataVigenciaInicialMin: '2024-01-01',
@@ -98,33 +89,13 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   // Helper to calculate or estimate the Managing Unit's (UASG Gerenciadora) available balance
   const getSaldoGerenciador = (arp: ArpRecord) => {
-    // Exact realistic balances for key demo ATAs
-    if (arp.numeroAtaRegistroPreco === '00039/2025') {
-      return 125770.00;
-    }
-    if (arp.numeroAtaRegistroPreco === '00046/2025') {
-      return 691910.82;
-    }
-    if (arp.numeroAtaRegistroPreco === '00068/2024') {
-      return 12500.00;
-    }
-    if (arp.numeroAtaRegistroPreco === '00051/2025') {
-      return 1850000.00;
-    }
-    // Estimated at 42% of total value for other ATAs in list
-    return arp.valorTotal * 0.42;
+    return arp.valorTotal;
   };
 
   // Helper to check allocations and empenho links in Supabase and localStorage for indicators
   const checkAtaStatus = (numeroAta: string, uasg: string) => {
     let hasAllocations = false;
     let hasEmpenhos = empenhosDbSet.has(`${numeroAta}-${uasg}`);
-
-    // Simulation/demo defaults for SENASP key ATAs
-    if (uasg === '200331' && (numeroAta === '00068/2024' || numeroAta === '00051/2025')) {
-      hasAllocations = true;
-      hasEmpenhos = true;
-    }
 
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -155,7 +126,6 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
     let totalEmpenhadaValue = 0;
     const itemsAlocados = new Set<string>();
     const deptStats: Record<string, { unitName: string; count: number; allocatedQty: number; empenhadaQty: number; value: number }> = {};
-    let hasAllocationsInStorage = false;
 
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -167,11 +137,9 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
             const numeroItem = keyParts[keyParts.length - 1] || '';
             const uasg = keyParts[keyParts.length - 2] || '';
             
-            // Reconstruct the ATA number from parts between allocations and uasg
             const ataParts = keyParts.slice(2, keyParts.length - 2);
             let numeroAta = ataParts.join('-');
             
-            // Normalize hyphenated ATA to slash format if necessary
             if (!numeroAta.includes('/') && numeroAta.length > 5) {
               const lastHyphenIndex = numeroAta.lastIndexOf('-');
               if (lastHyphenIndex !== -1) {
@@ -179,36 +147,19 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
               }
             }
 
-            // Check if this allocation's ATA is in the currently filtered list
             const isAtaInFilteredList = filteredList.some(
               arp => arp.numeroAtaRegistroPreco === numeroAta && arp.codigoUnidadeGerenciadora === uasg
             );
 
             if (!isAtaInFilteredList) {
-              continue; // Skip this allocation because it's filtered out!
+              continue;
             }
 
-            hasAllocationsInStorage = true;
-
-            let unitPrice = 150.00;
-            if (DEFAULT_ITEM_PRICES[numeroItem]) {
-              unitPrice = DEFAULT_ITEM_PRICES[numeroItem];
-            }
+            let unitPrice = 0;
             const metaStored = localStorage.getItem(`saldoarp-item-meta-${numeroAta}-${numeroItem}`);
             if (metaStored) {
               try {
-                unitPrice = JSON.parse(metaStored).valorUnitario || unitPrice;
-              } catch {
-                // Ignorar erro
-              }
-            }
-
-            let empenhoLinks: Record<string, string> = {};
-            const linksKey = `saldoarp-empenho-links-${keyParts[2]}-${keyParts[3]}-${keyParts[4]}-${numeroItem}`;
-            const linksStored = localStorage.getItem(linksKey);
-            if (linksStored) {
-              try {
-                empenhoLinks = JSON.parse(linksStored);
+                unitPrice = JSON.parse(metaStored).valorUnitario || 0;
               } catch {
                 // Ignorar erro
               }
@@ -216,17 +167,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
             storedAllocations.forEach((alloc: any) => {
               itemsAlocados.add(`${numeroAta}-${numeroItem}`);
-              
-              let empQty = alloc.empenhadaQty || 0;
-              if (uasg === '200331' && numeroItem === '00011' && alloc.id === '2' && Object.keys(empenhoLinks).length === 0) {
-                empQty = 178; // Default linked simulated empenho
-              }
-
-              if (Object.keys(empenhoLinks).length > 0) {
-                if (empenhoLinks["200331 - SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP"] === alloc.id) {
-                  empQty += 178;
-                }
-              }
+              const empQty = alloc.empenhadaQty || 0;
 
               totalAllocatedQty += alloc.allocatedQty;
               totalAllocatedValue += alloc.allocatedQty * unitPrice;
@@ -247,34 +188,6 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
       }
     } catch {
       // Ignorar erros gerais de leitura do storage
-    }
-
-    // Seed mock data if no storage allocations exist yet (to provide a populated demo)
-    if (!hasAllocationsInStorage && params.codigoUnidadeGerenciadora === '200331') {
-      const mockDepts = [
-        { unitName: 'Coordenação-Geral de Operações Especiais (CGOE)', count: 2, allocatedQty: 120, empenhadaQty: 0, value: 24800.00, ataRef: '00068/2024' },
-        { unitName: 'Diretoria da Força Nacional de Segurança Pública (DFN)', count: 2, allocatedQty: 90, empenhadaQty: 0, value: 18600.00, ataRef: '00051/2025' },
-        { unitName: 'Assessoria de Inteligência (ASSIN)', count: 1, allocatedQty: 30, empenhadaQty: 0, value: 6200.00, ataRef: '00068/2024' }
-      ];
-      mockDepts.forEach(d => {
-        const isAtaInFilteredList = filteredList.some(arp => arp.numeroAtaRegistroPreco === d.ataRef);
-        if (isAtaInFilteredList) {
-          if (!deptStats[d.unitName]) {
-            deptStats[d.unitName] = { unitName: d.unitName, count: 0, allocatedQty: 0, empenhadaQty: 0, value: 0 };
-          }
-          deptStats[d.unitName].count += d.count;
-          deptStats[d.unitName].allocatedQty += d.allocatedQty;
-          deptStats[d.unitName].empenhadaQty += d.empenhadaQty;
-          deptStats[d.unitName].value += d.value;
-          
-          totalAllocatedQty += d.allocatedQty;
-          totalAllocatedValue += d.value;
-          totalEmpenhadaQty += d.empenhadaQty;
-          totalEmpenhadaValue += d.empenhadaQty * 206.66;
-          
-          itemsAlocados.add(`${d.ataRef}-00011`);
-        }
-      });
     }
 
     return {

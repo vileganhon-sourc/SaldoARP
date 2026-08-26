@@ -42,27 +42,7 @@ export async function fetchProcessosSei(): Promise<ProcessoSei[]> {
     console.error('Erro no fallback do localStorage para Processos SEI', e);
   }
 
-  // Retorna conjunto inicial de exemplo se não houver dados
-  return [
-    {
-      id: 'sei-001',
-      numeroProcessoSei: '10154.000123/2024-11',
-      descricaoObjeto: 'Instrução para aquisição de equipamentos táticos e facas de mergulho para a Força Nacional',
-      unidadeRequisitante: 'SENASP / CGOE',
-      responsavelNome: 'Cap. Oliveira',
-      statusProcesso: 'Empenhado',
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: 'sei-002',
-      numeroProcessoSei: '10154.000456/2025-88',
-      descricaoObjeto: 'Instrução de adesão de saldo para drones e baterias teleguiadas UFRR',
-      unidadeRequisitante: 'SENASP / DLOG',
-      responsavelNome: 'Maj. Roberto',
-      statusProcesso: 'Em Instrução',
-      createdAt: new Date().toISOString()
-    }
-  ];
+  return [];
 }
 
 /**

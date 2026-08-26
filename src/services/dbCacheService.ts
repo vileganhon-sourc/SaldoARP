@@ -206,10 +206,6 @@ export async function fetchEmpenhoDetailsFromDb(numeroAta: string, uasg: string)
 export async function fetchAtasWithEmpenhosSet(): Promise<Set<string>> {
   const set = new Set<string>();
 
-  // Demo defaults
-  set.add('00068/2024-200331');
-  set.add('00051/2025-200331');
-
   if (isSupabaseConfigured && supabase) {
     try {
       const { data: alocacoes } = await supabase
