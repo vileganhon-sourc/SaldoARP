@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Calendar, FileText, Building2, ChevronRight, HelpCircle, DollarSign, Users, TrendingUp, BarChart2 } from 'lucide-react';
 import { fetchArps } from '../services/api';
-import { fetchAtasWithEmpenhosSet } from '../services/dbCacheService';
+import { fetchAtasWithEmpenhosSet, fetchAtasWithAllocationsSet } from '../services/dbCacheService';
 import type { ArpRecord, FilterParams } from '../types';
 
 interface ArpSearchProps {
@@ -23,15 +23,20 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   const [arps, setArps] = useState<ArpRecord[]>([]);
   const [empenhosDbSet, setEmpenhosDbSet] = useState<Set<string>>(new Set());
+  const [allocationsDbSet, setAllocationsDbSet] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadEmpenhosDbSet = async () => {
+  const loadDbSets = async () => {
     try {
-      const set = await fetchAtasWithEmpenhosSet();
-      setEmpenhosDbSet(set);
+      const [empSet, allocSet] = await Promise.all([
+        fetchAtasWithEmpenhosSet(),
+        fetchAtasWithAllocationsSet()
+      ]);
+      setEmpenhosDbSet(empSet);
+      setAllocationsDbSet(allocSet);
     } catch (e) {
-      console.warn('Erro ao carregar Atas com Empenhos do DB', e);
+      console.warn('Erro ao carregar conjuntos do DB', e);
     }
   };
 
@@ -52,7 +57,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
         setError('Nenhuma Ata encontrada para os filtros especificados.');
       }
     } catch (err: any) {
-      setError(err.message || 'Falha ao buscar as Atas do servidor.');
+      setError(err.message || 'Falha ao buscar as Atas de Registro de Preço na API.');
     } finally {
       setLoading(false);
     }
@@ -60,7 +65,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   // Automatically trigger search on mount to load initial list
   useEffect(() => {
-    loadEmpenhosDbSet();
+    loadDbSets();
     handleSearch();
   }, []);
 
@@ -94,7 +99,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   // Helper to check allocations and empenho links in Supabase and localStorage for indicators
   const checkAtaStatus = (numeroAta: string, uasg: string) => {
-    let hasAllocations = false;
+    let hasAllocations = allocationsDbSet.has(`${numeroAta}-${uasg}`);
     let hasEmpenhos = empenhosDbSet.has(`${numeroAta}-${uasg}`);
 
     try {

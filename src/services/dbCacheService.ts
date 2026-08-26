@@ -258,3 +258,83 @@ export async function fetchAtasWithEmpenhosSet(): Promise<Set<string>> {
   return set;
 }
 
+/**
+ * Retorna o conjunto de chaves de Atas (numeroAta-uasg) que possuem alocações internas cadastradas (Supabase + localStorage)
+ */
+export async function fetchAtasWithAllocationsSet(): Promise<Set<string>> {
+  const set = new Set<string>();
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      // 1. Consulta arp_allocations (tabela de alocações internas por item_key)
+      const { data: arpAllocations } = await supabase
+        .from('arp_allocations')
+        .select('item_key');
+
+      if (arpAllocations && arpAllocations.length > 0) {
+        arpAllocations.forEach((alloc: any) => {
+          const parts = (alloc.item_key || '').split('-');
+          if (parts.length >= 3) {
+            parts.pop(); // remove itemNum
+            const uasg = parts.pop();
+            const numAta = parts.join('-');
+            if (numAta && uasg) {
+              set.add(`${numAta}-${uasg}`);
+            }
+          }
+        });
+      }
+
+      // 2. Consulta alocacoes_internas via join com itens_ata
+      const { data: alocacoes } = await supabase
+        .from('alocacoes_internas')
+        .select(`
+          quantidade_alocada,
+          itens_ata (
+            numero_item,
+            atas_registro_preco (
+              numero_ata,
+              codigo_uasg
+            )
+          )
+        `);
+
+      if (alocacoes && alocacoes.length > 0) {
+        alocacoes.forEach((al: any) => {
+          if (Number(al.quantidade_alocada) > 0) {
+            const ata = al.itens_ata?.atas_registro_preco;
+            if (ata && ata.numero_ata && ata.codigo_uasg) {
+              set.add(`${ata.numero_ata}-${ata.codigo_uasg}`);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar Atas com alocações do Supabase', e);
+    }
+  }
+
+  // 3. Complementa com localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('saldoarp-allocations-')) {
+        const data = JSON.parse(localStorage.getItem(key) || '[]');
+        if (Array.isArray(data) && data.length > 0) {
+          const parts = key.replace('saldoarp-allocations-', '').split('-');
+          if (parts.length >= 3) {
+            parts.pop(); // remove itemNum
+            const uasg = parts.pop();
+            const numAta = parts.join('-');
+            if (numAta && uasg) {
+              set.add(`${numAta}-${uasg}`);
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return set;
+}
+
