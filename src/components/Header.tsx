@@ -26,38 +26,37 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
             gov<span style={{ color: '#00cc55' }}>.</span>br
           </span>
           <span style={{ opacity: 0.5, margin: '0 0.25rem' }}>|</span>
-          <span style={{ fontWeight: 400, opacity: 0.9 }}>Governo Federal</span>
+          <span style={{ fontWeight: 600, opacity: 0.95 }}>Ministério da Justiça e Segurança Pública</span>
         </div>
         <div style={{ display: 'flex', gap: '1.25rem', opacity: 0.9, fontWeight: 400 }} className="gov-topbar-links">
+          <a href="https://www.gov.br/mj/pt-br" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>Portal MJSP</a>
           <a href="https://www.gov.br/pt-br/orgaos-do-governo" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>Órgãos do Governo</a>
           <a href="https://www.gov.br/acessoainformacao/pt-br" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>Acesso à Informação</a>
-          <a href="https://www.planalto.gov.br/legislacao" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>Legislação</a>
-          <a href="https://www.gov.br/secom/pt-br/canais_atendimento" target="_blank" rel="noopener noreferrer" style={{ color: 'white', textDecoration: 'none' }}>Canais</a>
         </div>
       </div>
 
-      {/* Main Gov.br Styled Header */}
+      {/* Main MJSP Styled Header */}
       <header style={{
         background: '#ffffff',
-        borderBottom: '2px solid #1351b4',
-        padding: '1.25rem 3rem',
+        borderBottom: '3px solid #0c326f',
+        padding: '1.1rem 3rem',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.06)',
         fontFamily: 'var(--font-family)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
           <div style={{
-            width: '45px',
-            height: '45px',
+            width: '48px',
+            height: '48px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}>
             <img 
               src="/logo.png" 
-              alt="Logo Compras SUSP" 
+              alt="Logo Compras SUSP / MJSP" 
               style={{ 
                 maxHeight: '100%', 
                 maxWidth: '100%', 
@@ -66,11 +65,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
             />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#000000', margin: 0, letterSpacing: '-0.02em', borderBottom: 'none', paddingBottom: 0 }}>
-              Controle de Saldos ARP
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0c326f', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Ministério da Justiça e Segurança Pública
+            </div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', margin: '0.1rem 0 0 0', letterSpacing: '-0.02em', borderBottom: 'none', paddingBottom: 0 }}>
+              SaldoARP <span style={{ fontWeight: 400, fontSize: '1.1rem', color: '#475569' }}>| Gestão de Registro de Preços</span>
             </h1>
-            <p style={{ fontSize: '0.82rem', color: '#556275', margin: '0.1rem 0 0 0', fontWeight: 500 }}>
-              Controle Interno de Saldo de Registro de Preços | Ministério da Gestão e da Inovação em Serviços Públicos
+            <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.1rem 0 0 0', fontWeight: 500 }}>
+              Secretaria Nacional de Segurança Pública — SENASP
             </p>
           </div>
         </div>
@@ -80,30 +82,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
             <button
               onClick={onOpenSeiModal}
               style={{
-                backgroundColor: '#1351b4',
+                backgroundColor: '#0c326f',
                 color: '#ffffff',
                 border: 'none',
-                padding: '0.45rem 0.9rem',
+                padding: '0.5rem 1rem',
                 borderRadius: '6px',
                 fontSize: '0.82rem',
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.4rem',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                transition: 'all 0.2s ease'
               }}
             >
-              <FileText size={15} color="#00cc55" /> Processos SEI
+              <FileText size={16} color="#00cc55" /> Processos SEI
             </button>
           )}
 
-          <span className="badge badge-success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Database size={14} color="#10b981" /> Cache Banco (Ativo)
+          <span className="badge" style={{ backgroundColor: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+            <Database size={14} color="#0284c7" /> Cache Banco (Ativo)
           </span>
 
-          <span className="badge badge-success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Wifi size={14} /> API Conectada
+          <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #86efac', fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+            <Wifi size={14} color="#16a34a" /> API Conectada
           </span>
         </div>
       </header>

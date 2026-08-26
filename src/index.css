@@ -1,38 +1,44 @@
 /* CSS System for SaldoARP - Gov.br Standard Layout (Light Theme) */
 
 :root {
-  --bg-primary: #f6f8fa;
+  --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
-  --bg-card-hover: #fcfdfe;
-  --bg-footer: #13315c;
+  --bg-card-hover: #f1f5f9;
+  --bg-footer: #0c326f;
   
   --primary: #1351b4;
-  --primary-hover: #0f4094;
+  --primary-hover: #0f4098;
   --primary-rgb: 19, 81, 180;
   
-  --accent: #ca8a04;
-  --accent-hover: #a16207;
+  --mjsp-blue-dark: #0c326f;
+  --mjsp-blue-primary: #1351b4;
+  --mjsp-blue-hover: #0f4098;
+  --mjsp-green: #00cc55;
+  --mjsp-green-dark: #16a34a;
   
-  --success: #168821;
-  --success-bg: rgba(22, 136, 33, 0.08);
-  --warning: #e68f00;
-  --warning-bg: rgba(230, 143, 0, 0.08);
-  --danger: #df152a;
-  --danger-bg: rgba(223, 21, 42, 0.08);
+  --accent: #1351b4;
+  --accent-hover: #0f4098;
   
-  --text-primary: #1c2b44;
-  --text-secondary: #4a5c78;
-  --text-muted: #7488a6;
+  --success: #16a34a;
+  --success-bg: rgba(22, 163, 74, 0.08);
+  --warning: #d97706;
+  --warning-bg: rgba(217, 119, 6, 0.08);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.08);
   
-  --border-color: #ccd1db;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  
+  --border-color: #cbd5e1;
   --border-color-hover: #1351b4;
   
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.03), 0 4px 6px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
   
-  --font-family: 'Rawline', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family: 'Rawline', 'Raleway', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --transition-smooth: all 0.2s ease-in-out;
 }
 

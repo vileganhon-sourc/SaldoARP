@@ -69,26 +69,30 @@ const App: React.FC = () => {
       />
 
       <footer style={{
-        background: 'var(--bg-footer)',
+        background: '#0c326f',
         color: '#ffffff',
         padding: '2.5rem 3rem',
         fontSize: '0.82rem',
         fontFamily: 'var(--font-family)',
         marginTop: '5rem',
-        borderTop: '4px solid var(--accent)'
+        borderTop: '4px solid #00cc55'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
           <div>
-            <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.25rem' }}>Controle de Saldos ARP</p>
-            <p style={{ opacity: 0.8 }}>Controle Interno de Saldo de Registro de Preços do Governo Federal.</p>
-            <p style={{ opacity: 0.6, fontSize: '0.75rem', marginTop: '0.5rem' }}>
-              © {new Date().getFullYear()} Controle de Saldos ARP. Desenvolvido para fins de transparência e eficiência pública.
+            <p style={{ fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.25rem', color: '#ffffff' }}>
+              Ministério da Justiça e Segurança Pública
+            </p>
+            <p style={{ opacity: 0.9, color: '#e2e8f0' }}>
+              Secretaria Nacional de Segurança Pública — SENASP | Controle de Saldos de Atas de Registro de Preços
+            </p>
+            <p style={{ opacity: 0.7, fontSize: '0.75rem', marginTop: '0.5rem', color: '#cbd5e1' }}>
+              © {new Date().getFullYear()} Governo Federal. Todos os direitos reservados. Padrão Visual Institucional BR-DS / MJSP.
             </p>
           </div>
-          <div style={{ textAlign: 'right', opacity: 0.8 }}>
-            <p style={{ fontWeight: 600 }}>Dados Abertos do Compras.gov.br</p>
-            <p style={{ fontSize: '0.78rem', marginTop: '0.2rem', opacity: 0.7 }}>
-              Consumindo dados em tempo real da API oficial do Portal de Compras Governamentais do Brasil.
+          <div style={{ textAlign: 'right', opacity: 0.9 }}>
+            <p style={{ fontWeight: 700, color: '#ffffff' }}>Dados Oficiais das APIs Compras.gov.br e PNCP</p>
+            <p style={{ fontSize: '0.78rem', marginTop: '0.2rem', opacity: 0.8, color: '#cbd5e1' }}>
+              Sincronizado com os dados abertos do Governo Federal e licitações públicas.
             </p>
           </div>
         </div>
