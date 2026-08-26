@@ -99,8 +99,31 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
 
   // Helper to check allocations and empenho links in Supabase and localStorage for indicators
   const checkAtaStatus = (numeroAta: string, uasg: string) => {
-    let hasAllocations = allocationsDbSet.has(`${numeroAta}-${uasg}`);
-    let hasEmpenhos = empenhosDbSet.has(`${numeroAta}-${uasg}`);
+    const keyPadded = `${numeroAta}-${uasg}`;
+    const keyUnpadded = `${numeroAta.replace(/^0+/, '')}-${uasg}`;
+    const parts = numeroAta.split('/');
+    const shortKey = parts.length === 2 ? `${parseInt(parts[0], 10)}/${parts[1]}-${uasg}` : keyPadded;
+
+    let hasAllocations = allocationsDbSet.has(keyPadded) || allocationsDbSet.has(keyUnpadded) || allocationsDbSet.has(shortKey);
+    let hasEmpenhos = empenhosDbSet.has(keyPadded) || empenhosDbSet.has(keyUnpadded) || empenhosDbSet.has(shortKey);
+
+    if (!hasEmpenhos) {
+      for (const item of empenhosDbSet) {
+        if (item.includes(uasg) && (item.includes(numeroAta) || item.includes(shortKey) || item.includes(keyUnpadded))) {
+          hasEmpenhos = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasAllocations) {
+      for (const item of allocationsDbSet) {
+        if (item.includes(uasg) && (item.includes(numeroAta) || item.includes(shortKey) || item.includes(keyUnpadded))) {
+          hasAllocations = true;
+          break;
+        }
+      }
+    }
 
     try {
       for (let i = 0; i < localStorage.length; i++) {
