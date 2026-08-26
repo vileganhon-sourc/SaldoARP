@@ -425,142 +425,167 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp }) => {
       </section>
 
       {/* Search Filter Card */}
-      <section className="glass-card">
-        <h2 className="section-title" style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>
-          <Search size={20} color="var(--primary)" /> Filtrar Atas de Registro de Preços
-        </h2>
+      <section className="glass-card" style={{ padding: '1.5rem 2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.75rem' }}>
+          <h2 className="section-title" style={{ fontSize: '1.2rem', margin: 0, borderBottom: 'none', paddingBottom: 0, color: '#0c326f' }}>
+            <Search size={20} color="#1351b4" /> Filtrar Atas de Registro de Preços
+          </h2>
+          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            Campos marcados com * são obrigatórios para busca na API
+          </span>
+        </div>
 
-        <form onSubmit={handleSearch} className="search-grid">
-          <div className="form-group">
-            <label className="form-label">
-              <Building2 size={13} style={{ marginRight: '4px' }} /> Unidade Gerenciadora (UASG)
-            </label>
-            <input 
-              type="text" 
-              className="form-input"
-              placeholder="Ex: 200331"
-              value={params.codigoUnidadeGerenciadora || ''}
-              onChange={(e) => setParams({ ...params, codigoUnidadeGerenciadora: e.target.value })}
-            />
+        <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Grid de 4 Colunas Perfeitamente Alinhadas */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
+            <div className="form-group">
+              <label className="form-label">
+                <Building2 size={13} style={{ marginRight: '4px' }} /> Unidade Gerenciadora (UASG)
+              </label>
+              <input 
+                type="text" 
+                className="form-input"
+                placeholder="Ex: 200331"
+                value={params.codigoUnidadeGerenciadora || ''}
+                onChange={(e) => setParams({ ...params, codigoUnidadeGerenciadora: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência Inicial (Mínima) *
+              </label>
+              <input 
+                type="date" 
+                className="form-input"
+                value={params.dataVigenciaInicialMin}
+                onChange={(e) => setParams({ ...params, dataVigenciaInicialMin: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência Inicial (Máxima) *
+              </label>
+              <input 
+                type="date" 
+                className="form-input"
+                value={params.dataVigenciaInicialMax}
+                onChange={(e) => setParams({ ...params, dataVigenciaInicialMax: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <FileText size={13} style={{ marginRight: '4px' }} /> Número da Ata
+              </label>
+              <input 
+                type="text" 
+                className="form-input"
+                placeholder="Ex: 00064/2024"
+                value={params.numeroAtaRegistroPreco || ''}
+                onChange={(e) => setParams({ ...params, numeroAtaRegistroPreco: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência (Status)
+              </label>
+              <select
+                className="form-input"
+                value={filterVigencia}
+                onChange={(e) => setFilterVigencia(e.target.value as any)}
+                style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+              >
+                <option value="TODAS">Todas</option>
+                <option value="VIGENTE">Vigente</option>
+                <option value="EXPIRADA">Expirada</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <Users size={13} style={{ marginRight: '4px' }} /> Alocação Interna
+              </label>
+              <select
+                className="form-input"
+                value={filterAlocacao}
+                onChange={(e) => setFilterAlocacao(e.target.value as any)}
+                style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+              >
+                <option value="TODAS">Todas</option>
+                <option value="SIM">Com Alocação</option>
+                <option value="NAO">Sem Alocação</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <DollarSign size={13} style={{ marginRight: '4px' }} /> Empenho Vinculado
+              </label>
+              <select
+                className="form-input"
+                value={filterEmpenho}
+                onChange={(e) => setFilterEmpenho(e.target.value as any)}
+                style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+              >
+                <option value="TODAS">Todas</option>
+                <option value="SIM">Com Empenho</option>
+                <option value="NAO">Sem Empenho</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                <FileText size={13} style={{ marginRight: '4px' }} /> Status da Ata
+              </label>
+              <select
+                className="form-input"
+                value={filterStatusAta}
+                onChange={(e) => setFilterStatusAta(e.target.value)}
+                style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+              >
+                <option value="TODAS">Todas</option>
+                <option value="Ata de Registro de Preços">Ativa (Ata de Registro de Preços)</option>
+                <option value="Cancelada">Cancelada</option>
+              </select>
+            </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">
-              <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência Inicial (Mínima) *
-            </label>
-            <input 
-              type="date" 
-              className="form-input"
-              value={params.dataVigenciaInicialMin}
-              onChange={(e) => setParams({ ...params, dataVigenciaInicialMin: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">
-              <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência Inicial (Máxima) *
-            </label>
-            <input 
-              type="date" 
-              className="form-input"
-              value={params.dataVigenciaInicialMax}
-              onChange={(e) => setParams({ ...params, dataVigenciaInicialMax: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">
-              <FileText size={13} style={{ marginRight: '4px' }} /> Número da Ata
-            </label>
-            <input 
-              type="text" 
-              className="form-input"
-              placeholder="Ex: 00064/2024"
-              value={params.numeroAtaRegistroPreco || ''}
-              onChange={(e) => setParams({ ...params, numeroAtaRegistroPreco: e.target.value })}
-            />
-          </div>
-
-          {/* Corrected "Vigência (Status)" Dropdown (height issue resolved by using CSS inherit) */}
-          <div className="form-group">
-            <label className="form-label">
-              <Calendar size={13} style={{ marginRight: '4px' }} /> Vigência (Status)
-            </label>
-            <select
-              className="form-input"
-              value={filterVigencia}
-              onChange={(e) => setFilterVigencia(e.target.value as any)}
-              style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+          {/* Barra de Ações com Botão Consultar e Limpar Alinhados à Direita */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid #f1f5f9' }}>
+            <button 
+              type="button" 
+              onClick={() => {
+                setParams({
+                  dataVigenciaInicialMin: '2024-01-01',
+                  dataVigenciaInicialMax: '2028-08-21',
+                  codigoUnidadeGerenciadora: '200331',
+                  numeroAtaRegistroPreco: ''
+                });
+                setFilterVigencia('TODAS');
+                setFilterAlocacao('TODAS');
+                setFilterEmpenho('TODAS');
+                setFilterStatusAta('TODAS');
+              }}
+              className="btn"
+              style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '0.5rem 1.25rem', height: '42px', fontSize: '0.85rem', fontWeight: 600 }}
             >
-              <option value="TODAS">Todas</option>
-              <option value="VIGENTE">Vigente</option>
-              <option value="EXPIRADA">Expirada</option>
-            </select>
-          </div>
+              Limpar Filtros
+            </button>
 
-          {/* New "Alocação" Filter */}
-          <div className="form-group">
-            <label className="form-label">
-              <Users size={13} style={{ marginRight: '4px' }} /> Alocação Interna
-            </label>
-            <select
-              className="form-input"
-              value={filterAlocacao}
-              onChange={(e) => setFilterAlocacao(e.target.value as any)}
-              style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
+            <button 
+              type="submit" 
+              className="btn btn-primary" 
+              style={{ backgroundColor: '#0c326f', borderColor: '#0c326f', padding: '0.5rem 1.75rem', height: '42px', fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
             >
-              <option value="TODAS">Todas</option>
-              <option value="SIM">Com Alocação</option>
-              <option value="NAO">Sem Alocação</option>
-            </select>
-          </div>
-
-          {/* New "Empenho" Filter */}
-          <div className="form-group">
-            <label className="form-label">
-              <DollarSign size={13} style={{ marginRight: '4px' }} /> Empenho Vinculado
-            </label>
-            <select
-              className="form-input"
-              value={filterEmpenho}
-              onChange={(e) => setFilterEmpenho(e.target.value as any)}
-              style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
-            >
-              <option value="TODAS">Todas</option>
-              <option value="SIM">Com Empenho</option>
-              <option value="NAO">Sem Empenho</option>
-            </select>
-          </div>
-
-          {/* New "Status da Ata" Filter */}
-          <div className="form-group">
-            <label className="form-label">
-              <FileText size={13} style={{ marginRight: '4px' }} /> Status da Ata
-            </label>
-            <select
-              className="form-input"
-              value={filterStatusAta}
-              onChange={(e) => setFilterStatusAta(e.target.value)}
-              style={{ background: '#ffffff', color: 'var(--text-primary)', fontWeight: 600, cursor: 'pointer' }}
-            >
-              <option value="TODAS">Todas</option>
-              <option value="Ata de Registro de Preços">Ativa (Ata de Registro de Preços)</option>
-              <option value="Cancelada">Cancelada</option>
-            </select>
-          </div>
-
-          <div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '45px' }}>
-              <Search size={18} /> Consultar
+              <Search size={18} /> CONSULTAR
             </button>
           </div>
         </form>
-
-        <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          💡 <strong>Dica de busca de simulação:</strong> Use UASG <code>200331</code> com Vigência <code>01/01/2024</code> a <code>21/08/2028</code>, ou UASG <code>154080</code> com Vigência <code>01/01/2026</code>.
-        </div>
       </section>
 
       {/* Results Section */}
