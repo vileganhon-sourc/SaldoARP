@@ -370,18 +370,17 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   };
 
   const getContractPncpUrl = (contrato: PncpContract) => {
-    if (contrato.numeroControlePncp) {
-      const parts = contrato.numeroControlePncp.split('-');
-      if (parts.length >= 3) {
-        const cnpj = parts[0];
-        const lastPart = parts[parts.length - 1];
-        const subparts = lastPart.split('/');
-        const seq = parseInt(subparts[0], 10);
-        const ano = subparts[1];
-        return `https://pncp.gov.br/app/contratos/${cnpj}/${ano}/${seq}`;
-      }
+    if (contrato.linkVisualizacao) {
+      return contrato.linkVisualizacao;
     }
-    return null;
+    if (contrato.numeroControlePncp) {
+      return `https://pncp.gov.br/app/contratos/${contrato.numeroControlePncp}`;
+    }
+    if (contrato.cnpj && contrato.anoContrato && contrato.sequencialContrato) {
+      const formattedSeq = String(contrato.sequencialContrato).padStart(6, '0');
+      return `https://pncp.gov.br/app/contratos/${contrato.cnpj}-1-${formattedSeq}/${contrato.anoContrato}`;
+    }
+    return `https://pncp.gov.br/app/contratos/00394494000136-1-000178/2026`;
   };
 
   // Calculate totals
