@@ -745,9 +745,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
 
   const getContractPncpUrl = (contrato: PncpContract) => {
     return formatPncpContractUrl(
-      contrato.cnpj,
-      contrato.anoContrato,
-      contrato.sequencialContrato,
       contrato.numeroControlePncp,
       contrato.linkVisualizacao
     );

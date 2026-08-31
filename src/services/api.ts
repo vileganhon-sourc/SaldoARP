@@ -791,8 +791,9 @@ export async function fetchPncpContracts(
       }
     }
 
-    const numeroControlePncp = detail?.numeroControlePNCP || c.numeroControle || c.numeroControlePncpContrato;
-    const linkVisualizacao = formatPncpContractUrl(contractCnpj, anoContrato, sequencialContrato, numeroControlePncp);
+    const numeroControlePncp = detail?.numeroControlePNCP || detail?.numeroControlePncp || c.numeroControlePNCP || c.numeroControle || c.numeroControlePncpContrato;
+    const rawLinkVisualizacao = detail?.linkVisualizacao || detail?.linkContrato || c.linkVisualizacao || c.linkContrato || c.linkContratoPNCP || c.urlContrato;
+    const linkVisualizacao = formatPncpContractUrl(numeroControlePncp, rawLinkVisualizacao);
 
     // Identificação precisa da UASG e classificação (200331 e 200330 são Gerenciadoras)
     const rawUasg = c.codigoUnidadeGestora || c.codigoUnidadeGestoraOrigemContrato || detail?.unidadeOrgao?.codigoUnidade || c.unidadeExecutora?.codigoUnidade || c.unidadeOrgao?.codigoUnidade || c.unidadeGestora || (c.unidadeNome?.match(/(\d{5,6})/)?.[1]) || fallbackParams?.codigoUnidadeGestora || '200331';

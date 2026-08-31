@@ -148,22 +148,29 @@ describe('Agrupamento de Atas e Utilitários', () => {
     expect(cardsEmpty[0].adesaoStatus).toBe('NAO_INFORMADA');
   });
 
-  it('Padrão correto de link no PNCP de contratos', () => {
+  it('Padrão correto de link no PNCP de contratos (sem fabricação indevida)', () => {
+    // 1. Se forneceu numeroControlePncp oficial -> formata para URL canônica
     expect(
-      formatPncpContractUrl(undefined, undefined, undefined, '00394494000136-2-001456/2026')
+      formatPncpContractUrl('00394494000136-2-001456/2026')
+    ).toBe('https://pncp.gov.br/app/contratos/00394494000136/2026/1456');
+
+    // 2. Se forneceu linkVisualizacao oficial -> formata e usa o oficial
+    expect(
+      formatPncpContractUrl(undefined, 'https://pncp.gov.br/app/contratos/00394494000136-2-001456/2026')
     ).toBe('https://pncp.gov.br/app/contratos/00394494000136/2026/1456');
 
     expect(
-      formatPncpContractUrl('00394494000136', '2026', '1456')
+      formatPncpContractUrl(undefined, 'https://pncp.gov.br/app/contratos/00394494000136/2026/1456')
     ).toBe('https://pncp.gov.br/app/contratos/00394494000136/2026/1456');
 
+    // 3. Caso contrário -> NÃO fabricar URL
     expect(
-      formatPncpContractUrl('00394494000136', 2026, '001456')
-    ).toBe('https://pncp.gov.br/app/contratos/00394494000136/2026/1456');
+      formatPncpContractUrl(undefined, undefined)
+    ).toBe('');
 
     expect(
-      formatPncpContractUrl(undefined, undefined, undefined, undefined, 'https://pncp.gov.br/app/contratos/00394494000136-2-001456/2026')
-    ).toBe('https://pncp.gov.br/app/contratos/00394494000136/2026/1456');
+      formatPncpContractUrl('', '')
+    ).toBe('');
   });
 
   it('Normalização de chave única de contratos para evitar duplicações', () => {
