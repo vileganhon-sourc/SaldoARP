@@ -360,6 +360,7 @@ export interface Contrato {
   cnpjFornecedor?: string;
   objeto?: string;
   quantidadeContratada?: number;
+  valorTotal?: number;
   origem: OrigemRegistro;
   criadoEm: string;
   atualizadoEm: string;

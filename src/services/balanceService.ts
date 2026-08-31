@@ -1,4 +1,4 @@
-import type { Empenho, ReconciliationReport } from '../types';
+import type { Empenho, Contrato, ContratoEmpenho, ReconciliationReport } from '../types';
 
 /**
  * Normaliza o número do empenho para comparação canônica.
@@ -32,6 +32,9 @@ export function getEmpenhoCanonicalKey(empenho: Partial<Empenho>): string {
 /**
  * 1. Calcula o total empenhado absoluto a partir de uma lista de empenhos.
  * Invariante: TotalEmpenhado = ∑ Empenho.quantidade
+ * 
+ * Regra:
+ * O mesmo empenho não é duplicado se estiver presente na lista uma única vez.
  */
 export function calculateTotalEmpenhado(empenhos: Empenho[]): number {
   if (!empenhos || empenhos.length === 0) return 0;
@@ -74,9 +77,10 @@ export function calculateTotalEmpenhadoPorOrigem(empenhos: Empenho[]): {
  * 3. Fórmula Oficial do Saldo Remanescente da Ata / Item:
  * Saldo = QuantidadeRegistrada - ∑ Empenhos
  * 
- * Regra:
+ * Regra Obrigatória:
  * NUNCA subtrair Contratos.
  * NUNCA subtrair Alocações Internas.
+ * Saldo negativo NÃO é convertido silenciosamente para zero.
  */
 export function calculateSaldo(quantidadeRegistrada: number, empenhos: Empenho[]): number {
   const qtdRegistrada = Number(quantidadeRegistrada) || 0;
@@ -85,7 +89,60 @@ export function calculateSaldo(quantidadeRegistrada: number, empenhos: Empenho[]
 }
 
 /**
- * 4. Calcula o balanço de uma Unidade Gestora específica.
+ * 4. Validação e cálculo seguro de saldo considerando a existência de Contratos e Vínculos.
+ * Garante que:
+ * - Contratos NÃO alteram diretamente o saldo.
+ * - Vínculo de Contrato a Empenho NÃO duplica empenho.
+ * - Mesmo empenho vinculado a múltiplos contratos NÃO duplica o consumo.
+ */
+export function calculateSaldoWithContratos(
+  quantidadeRegistrada: number,
+  empenhos: Empenho[],
+  _contratos?: Contrato[],
+  _vinculos?: ContratoEmpenho[]
+): {
+  saldo: number;
+  totalEmpenhado: number;
+  quantidadeRegistrada: number;
+  isConsistent: boolean;
+} {
+  const qtdRegistrada = Number(quantidadeRegistrada) || 0;
+  
+  // O consumo é computado ESTRITAMENTE a partir da lista única de empenhos
+  const totalEmpenhado = calculateTotalEmpenhado(empenhos);
+  const saldo = qtdRegistrada - totalEmpenhado;
+
+  return {
+    saldo,
+    totalEmpenhado,
+    quantidadeRegistrada: qtdRegistrada,
+    isConsistent: saldo >= 0
+  };
+}
+
+/**
+ * 5. Validação de Regras de Negócio de Contrato:
+ * - Contrato sem empenho = INVÁLIDO (rejeitado).
+ * - Contrato com 1 ou mais empenhos = VÁLIDO.
+ */
+export function validateContrato(
+  contrato: Partial<Contrato>,
+  empenhoIds: string[]
+): { valid: boolean; error?: string } {
+  if (!contrato.numero || !contrato.numero.trim()) {
+    return { valid: false, error: 'O número do contrato é obrigatório.' };
+  }
+  if (!empenhoIds || empenhoIds.length === 0) {
+    return {
+      valid: false,
+      error: 'Contrato inválido: todo contrato deve possuir pelo menos uma Nota de Empenho vinculada.'
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * 6. Calcula o balanço de uma Unidade Gestora específica.
  */
 export function calculateSaldoPorUnidade(
   quantidadeRegistradaUnidade: number,
@@ -110,8 +167,9 @@ export function calculateSaldoPorUnidade(
 }
 
 /**
- * 5. Calcula o saldo departamental de uma Alocação Interna:
+ * 7. Calcula o saldo departamental de uma Alocação Interna:
  * SaldoAlocacao = CotaAlocada - ∑ EmpenhosVinculadosAoDepartamento
+ * (Alocações organizam cotas internas e NÃO reduzem o saldo da ARP)
  */
 export function calculateSaldoAlocado(
   cotaAlocada: number,
@@ -136,9 +194,10 @@ export function calculateSaldoAlocado(
 }
 
 /**
- * 6. Relatório de Reconciliação Contábil e Auditoria do Item:
+ * 8. Relatório de Reconciliação Contábil e Auditoria do Item:
  * Compara Fonte 1 (API SIASG) com Fonte 2 (Soma dos Empenhos Conhecidos).
  * NÃO altera nem sobrescreve nenhuma das fontes automaticamente.
+ * Identifica explicitamente excessos/inconsistências quando Saldo < 0.
  */
 export function reconcileBalances(
   quantidadeRegistrada: number,
@@ -149,6 +208,22 @@ export function reconcileBalances(
   const breakdown = calculateTotalEmpenhadoPorOrigem(empenhos);
   const totalEmpenhado = breakdown.total;
   const saldoCalculado = qtdRegistrada - totalEmpenhado;
+
+  // Cenário de inconsistência / excesso
+  if (saldoCalculado < 0) {
+    const divergencia = saldoInformadoApi != null ? Number(saldoInformadoApi) - saldoCalculado : 0;
+    return {
+      quantidadeRegistrada: qtdRegistrada,
+      totalEmpenhadoApi: breakdown.api + breakdown.sincronizado,
+      totalEmpenhadoManual: breakdown.manual,
+      totalEmpenhado,
+      saldoCalculado,
+      saldoApi: saldoInformadoApi != null ? Number(saldoInformadoApi) : undefined,
+      divergencia,
+      status: 'DIVERGENTE',
+      mensagem: `⚠️ Situação de excesso/inconsistência: Total empenhado (${totalEmpenhado}) excede a quantidade registrada (${qtdRegistrada}). Saldo negativo apurado: ${saldoCalculado} un.`
+    };
+  }
 
   if (saldoInformadoApi === undefined || saldoInformadoApi === null || isNaN(saldoInformadoApi)) {
     return {
@@ -177,7 +252,7 @@ export function reconcileBalances(
       saldoApi: saldoApiNum,
       divergencia: 0,
       status: 'CONSISTENTE',
-      mensagem: 'Saldos consistentes. A soma dos empenhos confere com o saldo informado pela API.'
+      mensagem: '✓ SALDOS CONSISTENTES'
     };
   }
 
@@ -190,22 +265,20 @@ export function reconcileBalances(
     saldoApi: saldoApiNum,
     divergencia,
     status: 'DIVERGENTE',
-    mensagem: divergencia > 0
-      ? `Divergência: O SIASG/API informa ${divergencia} un a mais que a soma dos empenhos conhecidos.`
-      : `Divergência: A soma dos empenhos excede o saldo do SIASG/API em ${Math.abs(divergencia)} un.`
+    mensagem: `⚠️ Divergência de ${Math.abs(divergencia)} unidades.`
   };
 }
 
 /**
- * 7. Algoritmo Inteligente de Sincronização e Fusão (Smart Reconciliation / Upsert):
+ * 9. Algoritmo Inteligente de Sincronização e Fusão (Smart Reconciliation / Upsert):
  * Conecta empenhos vindos da API oficial com empenhos manuais cadastrados pelo usuário.
  * 
  * Regras:
- * - Se um empenho manual for localizado na API (mesmo número, ano, uasg, item):
+ * - Se um empenho manual for localizado na API (mesmo número normalizado, ano, uasg, item):
  *   1. Promove a origem para 'SINCRONIZADO'
  *   2. Mantém os metadados de alocação departamental preenchidos pelo usuário
  *   3. Não cria registro duplicado (evita dupla contagem)
- *   4. Valida se a quantidade oficial confere com a digitada manualmente
+ *   4. Valida se a quantidade oficial confere com a digitada manualmente; se diferir, marca como DIVERGENTE.
  */
 export function matchAndMergeEmpenhos(
   apiEmpenhos: Empenho[],
