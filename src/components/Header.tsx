@@ -1,11 +1,16 @@
 import React from 'react';
-import { Wifi, Database, FileText } from 'lucide-react';
+import { FileText, Building2 } from 'lucide-react';
 
 interface HeaderProps {
+  activeView?: 'search' | 'items' | 'balances' | 'allocations';
+  onNavigateView?: (view: 'search' | 'allocations') => void;
   onOpenSeiModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
+export const Header: React.FC<HeaderProps> = ({
+  activeView = 'search',
+  onNavigateView
+}) => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Gov.br Federal Identity Topbar */}
@@ -44,7 +49,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
         justifyContent: 'space-between',
         alignItems: 'center',
         boxShadow: '0 2px 4px rgba(0,0,0,0.06)',
-        fontFamily: 'var(--font-family)'
+        fontFamily: 'var(--font-family)',
+        flexWrap: 'wrap',
+        gap: '1rem'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
           <div style={{
@@ -77,38 +84,54 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeiModal }) => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {onOpenSeiModal && (
+        {/* View Switcher Navigation */}
+        {onNavigateView && (
+          <nav style={{ display: 'flex', gap: '0.5rem', background: '#f1f5f9', padding: '0.35rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
             <button
-              onClick={onOpenSeiModal}
+              type="button"
+              onClick={() => onNavigateView('search')}
               style={{
-                backgroundColor: '#0c326f',
-                color: '#ffffff',
-                border: 'none',
-                padding: '0.5rem 1rem',
-                borderRadius: '6px',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.4rem',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-                transition: 'all 0.2s ease'
+                padding: '0.5rem 1rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: activeView !== 'allocations' ? '#ffffff' : 'transparent',
+                color: activeView !== 'allocations' ? 'var(--primary)' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                boxShadow: activeView !== 'allocations' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                transition: 'var(--transition)'
               }}
             >
-              <FileText size={16} color="#00cc55" /> Processos SEI
+              <FileText size={15} /> Visão por Atas
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => onNavigateView('allocations')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.5rem 1rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: activeView === 'allocations' ? '#ffffff' : 'transparent',
+                color: activeView === 'allocations' ? 'var(--primary)' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                boxShadow: activeView === 'allocations' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                transition: 'var(--transition)'
+              }}
+            >
+              <Building2 size={15} /> Saldos por Unidade Interna
+            </button>
+          </nav>
+        )}
 
-          <span className="badge" style={{ backgroundColor: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-            <Database size={14} color="#0284c7" /> Cache Banco (Ativo)
-          </span>
-
-          <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #86efac', fontSize: '0.78rem', padding: '0.35rem 0.75rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-            <Wifi size={14} color="#16a34a" /> API Conectada
-          </span>
-        </div>
       </header>
     </div>
   );

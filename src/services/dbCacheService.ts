@@ -186,7 +186,7 @@ export async function fetchEmpenhoDetailsFromDb(numeroAta: string, uasg: string)
       return alocacoes
         .filter((a: any) => a.numero_empenho || a.quantidade_empenhada > 0)
         .map((a: any) => ({
-          numeroEmpenho: a.numero_empenho || '2025NE000123',
+          numeroEmpenho: a.numero_empenho || '',
           dataEmpenho: a.data_empenho || '',
           numeroProcessoSei: a.processos_sei?.numero_processo_sei || '',
           unidadeNome: a.unidade_nome || '',
@@ -205,18 +205,6 @@ export async function fetchEmpenhoDetailsFromDb(numeroAta: string, uasg: string)
  */
 export async function fetchAtasWithEmpenhosSet(): Promise<Set<string>> {
   const set = new Set<string>();
-
-  // Chaves padrão de Atas com empenhos no ecossistema SENASP
-  const defaultEmpenhoAtas = [
-    '00002/2026-200331', '2/2026-200331',
-    '00068/2024-200331', '68/2024-200331',
-    '00051/2025-200331', '51/2025-200331',
-    '00039/2025-200331', '39/2025-200331',
-    '00046/2025-200331', '46/2025-200331',
-    '00001/2026-200331', '1/2026-200331',
-    '00003/2026-200331', '3/2026-200331'
-  ];
-  defaultEmpenhoAtas.forEach(k => set.add(k));
 
   if (isSupabaseConfigured && supabase) {
     try {

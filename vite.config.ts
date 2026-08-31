@@ -15,6 +15,11 @@ export default defineConfig({
         target: 'https://pncp.gov.br',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-pncp/, '')
+      },
+      '/api-contratos-gov': {
+        target: 'https://contratos.comprasnet.gov.br',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-contratos-gov/, '')
       }
     }
   }

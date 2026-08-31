@@ -136,6 +136,28 @@ export interface EmpenhoSaldoItemRecord {
   valorEmpenhado?: number;
 }
 
+export interface AdesaoItemRecord {
+  numeroItem: string;
+  unidade: string;
+  tipo?: string;
+  quantidadeRegistrada: number;
+  quantidadeEmpenhada: number;
+  saldoEmpenho: number;
+  dataHoraInclusao: string | null;
+  dataHoraAtualizacao: string;
+  numeroAta?: string;
+  unidadeGerenciadora?: string;
+  orgaoAdesao?: string;
+  statusAdesao?: string;
+}
+
+export interface AdesoesItemResponse {
+  resultado: AdesaoItemRecord[];
+  totalRegistros: number;
+  totalPaginas: number;
+  paginasRestantes: number;
+}
+
 export interface InternalAllocation {
   id: string;
   unitName: string;
@@ -160,8 +182,96 @@ export interface PncpContract {
   receitaDespesa?: string;
   tipoContrato?: string;
   unidadeNome?: string;
-  quantidadeContratada?: number;
+  orgaoNome?: string;
+  uasg?: string;
+  tipoUnidade?: 'GERENCIADORA' | 'PARTICIPANTE';
+  contratoId?: number;
+  /** Quantidade contratada do item obtida via Contratos.gov.br e Compras.gov.br */
+  quantidadeContratada?: number | null;
+  valorUnitarioItem?: number | null;
+  valorTotalItem?: number | null;
+  numeroItemContratado?: string;
   linkVisualizacao?: string;
+}
+
+export interface EmpenhoItemMinuta {
+  sequencial_siafi?: number;
+  numero_item_compra?: string;
+  codigo_item?: number;
+  subelemento?: string;
+  descricao?: string;
+  descricao_detalhada?: string;
+  quantidade?: number;
+  valor_unitario?: number;
+  valor_total?: number;
+}
+
+export interface ContratosGovEmpenhoRecord {
+  id: number;
+  unidade_gestora?: string;
+  gestao?: string;
+  numero: string;
+  data_emissao: string;
+  credor?: string;
+  fonte_recurso?: string;
+  programa_trabalho?: string;
+  planointerno?: string;
+  naturezadespesa?: string;
+  empenhado: string | number;
+  aliquidar?: string | number;
+  liquidado?: string | number;
+  pago?: string | number;
+  rpinscrito?: string | number;
+  rpaliquidar?: string | number;
+  rpliquidado?: string | number;
+  rppago?: string | number;
+  informacao_complementar?: string;
+  sistema_origem?: string;
+  credor_obj?: {
+    tipo?: string;
+    cnpj_cpf_idgener?: string;
+    nome?: string;
+  };
+  links?: {
+    documento_pagamento?: string;
+  };
+  itens_minuta?: EmpenhoItemMinuta[];
+  quantidadeFisicaOriginal?: number;
+  quantidadeManual?: number;
+}
+
+export interface ComprasGovContratoItemRecord {
+  codigoOrgao?: string;
+  codigoUnidadeGestora?: string;
+  codigoUnidadeGestoraOrigemContrato?: string;
+  codigoUnidadeRealizadoraCompra?: string;
+  codigoModalidadeCompra?: string;
+  numeroContrato?: string;
+  niFornecedor?: string;
+  nomeRazaoSocialFornecedor?: string;
+  processo?: string;
+  dataVigenciaInicial?: string;
+  dataVigenciaFinal?: string;
+  valorGlobal?: number;
+  tipoItem?: string;
+  codigoItem?: number;
+  descricaoIitem?: string;
+  quantidadeItem?: number;
+  valorUnitarioItem?: number;
+  valorTotalItem?: number;
+  dataHoraInclusao?: string;
+  numeroControlePncpContrato?: string;
+  idCompra?: string;
+  numeroItem?: string;
+  nomeOrgao?: string;
+  nomeUnidadeGestora?: string;
+}
+
+export interface ComprasGovContratosItemResponse {
+  resultado: ComprasGovContratoItemRecord[];
+  totalRegistros: number;
+  totalPaginas: number;
+  paginasRestantes: number;
 }
 
 export interface PncpContractEmpenho {
@@ -196,4 +306,17 @@ export interface ExtendedInternalAllocation extends InternalAllocation {
   dataEmpenho?: string;
   observacoes?: string;
 }
+
+export type AdesaoStatusType = 'ACEITA' | 'NAO_ACEITA' | 'VARIAVEL' | 'NAO_INFORMADA';
+
+export interface AtaGroupedCard {
+  key: string;
+  arp: ArpRecord;
+  fornecedorNome: string;
+  fornecedorCnpj: string;
+  itens: ArpItemRecord[];
+  adesaoStatus: AdesaoStatusType;
+  totalItens: number;
+}
+
 

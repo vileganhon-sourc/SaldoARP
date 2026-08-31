@@ -1,6 +1,67 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { InternalAllocation } from '../types';
 
+export interface GlobalAllocationRecord {
+  id: string;
+  itemKey: string;
+  unitName: string;
+  allocatedQty: number;
+  empenhadaQty: number;
+}
+
+export async function fetchAllAllocationsGlobal(): Promise<GlobalAllocationRecord[]> {
+  const records: GlobalAllocationRecord[] = [];
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('arp_allocations')
+        .select('*');
+
+      if (!error && data && data.length > 0) {
+        return data.map((d: any) => ({
+          id: d.id,
+          itemKey: d.item_key,
+          unitName: d.unit_name,
+          allocatedQty: Number(d.allocated_qty),
+          empenhadaQty: Number(d.empenhada_qty) || 0
+        }));
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar todas as alocações do Supabase', e);
+    }
+  }
+
+  // Fallback para localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('saldoarp-allocations-')) {
+        const itemKey = key.replace('saldoarp-allocations-', '');
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((a: any) => {
+              records.push({
+                id: a.id,
+                itemKey,
+                unitName: a.unitName,
+                allocatedQty: Number(a.allocatedQty),
+                empenhadaQty: Number(a.empenhadaQty) || 0
+              });
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao ler alocações do localStorage', e);
+  }
+
+  return records;
+}
+
 export async function fetchAllocations(itemKey: string): Promise<InternalAllocation[]> {
   if (isSupabaseConfigured && supabase) {
     try {
@@ -125,5 +186,27 @@ export async function saveEmpenhoLinks(itemKey: string, links: Record<string, st
     } catch (e) {
       console.warn('Erro ao salvar vínculos no Supabase', e);
     }
+  }
+}
+
+export async function fetchEmpenhoManualQuantities(itemKey: string): Promise<Record<string, number>> {
+  try {
+    const key = `saldoarp-empenho-quantities-${itemKey}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Erro ao ler quantidades manuais de empenhos no localStorage', e);
+  }
+  return {};
+}
+
+export async function saveEmpenhoManualQuantities(itemKey: string, quantities: Record<string, number>): Promise<void> {
+  try {
+    const key = `saldoarp-empenho-quantities-${itemKey}`;
+    localStorage.setItem(key, JSON.stringify(quantities));
+  } catch (e) {
+    console.error('Erro ao salvar quantidades manuais de empenhos no localStorage', e);
   }
 }

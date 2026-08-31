@@ -3,10 +3,11 @@ import { Header } from './components/Header';
 import { ArpSearch } from './components/ArpSearch';
 import { ArpItems } from './components/ArpItems';
 import { ItemBalances } from './components/ItemBalances';
+import { InternalAllocationsDashboard } from './components/InternalAllocationsDashboard';
 import { SeiManagementModal } from './components/SeiManagementModal';
 import type { ArpRecord, ArpItemRecord } from './types';
 
-type ViewState = 'search' | 'items' | 'balances';
+type ViewState = 'search' | 'items' | 'balances' | 'allocations';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('search');
@@ -24,6 +25,12 @@ const App: React.FC = () => {
     setView('balances');
   };
 
+  const handleSelectItemFromSearch = (arp: ArpRecord, item: ArpItemRecord) => {
+    setSelectedArp(arp);
+    setSelectedItem(item);
+    setView('balances');
+  };
+
   const handleBackToSearch = () => {
     setSelectedArp(null);
     setSelectedItem(null);
@@ -35,14 +42,32 @@ const App: React.FC = () => {
     setView('items');
   };
 
+  const handleNavigateView = (targetView: 'search' | 'allocations') => {
+    setSelectedArp(null);
+    setSelectedItem(null);
+    setView(targetView);
+  };
+
   return (
     <div className="app-container">
-      <Header onOpenSeiModal={() => setIsSeiModalOpen(true)} />
+      <Header 
+        activeView={view} 
+        onNavigateView={handleNavigateView} 
+      />
 
       <main>
         {view === 'search' && (
           <ArpSearch 
             onSelectArp={handleSelectArp} 
+            onSelectItem={handleSelectItemFromSearch}
+            onOpenAllocationsPanel={() => setView('allocations')}
+          />
+        )}
+
+        {view === 'allocations' && (
+          <InternalAllocationsDashboard
+            onBack={() => setView('search')}
+            onSelectItem={handleSelectItemFromSearch}
           />
         )}
 
