@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import type { InternalAllocation } from '../types';
+import type { InternalAllocation, Empenho, Contrato, ContratoEmpenho } from '../types';
 
 export interface GlobalAllocationRecord {
   id: string;
@@ -210,3 +210,79 @@ export async function saveEmpenhoManualQuantities(itemKey: string, quantities: R
     console.error('Erro ao salvar quantidades manuais de empenhos no localStorage', e);
   }
 }
+
+// -------------------------------------------------------------
+// Persistência de Empenhos Manuais Canônicos
+// -------------------------------------------------------------
+export async function fetchManualEmpenhos(itemKey: string): Promise<Empenho[]> {
+  try {
+    const key = `saldoarp-manual-empenhos-${itemKey}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Erro ao ler empenhos manuais do localStorage', e);
+  }
+  return [];
+}
+
+export async function saveManualEmpenhos(itemKey: string, empenhos: Empenho[]): Promise<void> {
+  try {
+    const key = `saldoarp-manual-empenhos-${itemKey}`;
+    localStorage.setItem(key, JSON.stringify(empenhos));
+  } catch (e) {
+    console.error('Erro ao salvar empenhos manuais no localStorage', e);
+  }
+}
+
+// -------------------------------------------------------------
+// Persistência de Contratos Manuais Canônicos
+// -------------------------------------------------------------
+export async function fetchManualContratos(itemKey: string): Promise<Contrato[]> {
+  try {
+    const key = `saldoarp-manual-contratos-${itemKey}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Erro ao ler contratos manuais do localStorage', e);
+  }
+  return [];
+}
+
+export async function saveManualContratos(itemKey: string, contratos: Contrato[]): Promise<void> {
+  try {
+    const key = `saldoarp-manual-contratos-${itemKey}`;
+    localStorage.setItem(key, JSON.stringify(contratos));
+  } catch (e) {
+    console.error('Erro ao salvar contratos manuais no localStorage', e);
+  }
+}
+
+// -------------------------------------------------------------
+// Persistência de Relacionamentos Contrato-Empenho
+// -------------------------------------------------------------
+export async function fetchContratoEmpenhoLinks(itemKey: string): Promise<ContratoEmpenho[]> {
+  try {
+    const key = `saldoarp-contrato-empenho-links-${itemKey}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Erro ao ler links contrato-empenho do localStorage', e);
+  }
+  return [];
+}
+
+export async function saveContratoEmpenhoLinks(itemKey: string, links: ContratoEmpenho[]): Promise<void> {
+  try {
+    const key = `saldoarp-contrato-empenho-links-${itemKey}`;
+    localStorage.setItem(key, JSON.stringify(links));
+  } catch (e) {
+    console.error('Erro ao salvar links contrato-empenho no localStorage', e);
+  }
+}
+

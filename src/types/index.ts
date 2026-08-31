@@ -319,4 +319,69 @@ export interface AtaGroupedCard {
   totalItens: number;
 }
 
+// -------------------------------------------------------------
+// Domínio Canônico: Empenho, Contrato e Relacionamento
+// -------------------------------------------------------------
+export type OrigemRegistro = 'API' | 'MANUAL' | 'SINCRONIZADO';
+export type StatusEmpenho = 'CONFIRMADO' | 'PENDENTE' | 'DIVERGENTE';
+export type StatusReconciliacao = 'CONSISTENTE' | 'DIVERGENTE' | 'NAO_INFORMADO';
 
+export interface Empenho {
+  id: string;
+  numero: string;
+  ano: number;
+  arpId: string;
+  itemId: string;
+  uasg: string;
+  quantidade: number;
+  valorUnitario?: number;
+  valorTotal?: number;
+  data?: string;
+  fornecedor?: string;
+  cnpjFornecedor?: string;
+  unidadeInternaId?: string;
+  observacao?: string;
+  origem: OrigemRegistro;
+  status: StatusEmpenho;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface Contrato {
+  id: string;
+  numero: string;
+  ano: number;
+  arpId: string;
+  itemId?: string;
+  uasg: string;
+  numeroControlePncp?: string;
+  linkPncp?: string;
+  fornecedor?: string;
+  cnpjFornecedor?: string;
+  objeto?: string;
+  quantidadeContratada?: number;
+  origem: OrigemRegistro;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface ContratoEmpenho {
+  id: string;
+  contratoId: string;
+  empenhoId: string;
+  quantidadeVinculada?: number;
+  dataVinculo: string;
+  origem: OrigemRegistro;
+}
+
+export interface ReconciliationReport {
+  quantidadeRegistrada: number;
+  totalEmpenhadoApi: number;
+  totalEmpenhadoManual: number;
+  totalEmpenhado: number;
+  saldoCalculado: number;
+  saldoApi?: number;
+  divergencia: number;
+  status: StatusReconciliacao;
+  mensagem: string;
+}

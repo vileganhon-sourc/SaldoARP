@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, X, Check, ExternalLink, ChevronRight, ChevronDown, Share2 } from 'lucide-react';
+import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, ExternalLink, ChevronRight, ChevronDown, Check, X, Share2 } from 'lucide-react';
 import { fetchUnidadesItem, fetchEmpenhosSaldoItem, fetchPncpContracts, fetchPncpContractEmpenhos, fetchAdesoesItem, fetchContratosGovEmpenhos, fetchContratoEmpenhoDetalhe, fetchContratosGovData, getCanonicalContractKey } from '../services/api';
-import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks, fetchEmpenhoManualQuantities, saveEmpenhoManualQuantities } from '../services/allocationService';
+import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks, fetchEmpenhoManualQuantities, fetchManualEmpenhos, saveManualEmpenhos, fetchManualContratos, saveManualContratos, fetchContratoEmpenhoLinks, saveContratoEmpenhoLinks } from '../services/allocationService';
+import { calculateSaldo, calculateTotalEmpenhado, reconcileBalances, matchAndMergeEmpenhos, normalizeEmpenhoNumero } from '../services/balanceService';
 import { cacheArpsInDb, cacheArpItemsInDb } from '../services/dbCacheService';
 import { fetchDepartments, type InternalDepartment } from '../services/unitService';
 import { ManageDepartmentsModal } from './ManageDepartmentsModal';
+import { ManualEmpenhoModal } from './modals/ManualEmpenhoModal';
+import { ManualContratoModal } from './modals/ManualContratoModal';
+import { ItemReconciliationCard } from './ItemReconciliationCard';
 import { formatPncpContractUrl } from '../utils/pncpUtils';
-import type { ArpRecord, ArpItemRecord, UnidadeItemRecord, EmpenhoSaldoItemRecord, InternalAllocation, PncpContract, PncpContractEmpenho, AdesaoItemRecord, ContratosGovEmpenhoRecord } from '../types';
+import type { ArpRecord, ArpItemRecord, UnidadeItemRecord, EmpenhoSaldoItemRecord, InternalAllocation, PncpContract, PncpContractEmpenho, AdesaoItemRecord, ContratosGovEmpenhoRecord, Empenho, Contrato, ContratoEmpenho, ReconciliationReport } from '../types';
 
 interface ItemBalancesProps {
   arp: ArpRecord;
@@ -43,6 +47,101 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const [newAllocatedQty, setNewAllocatedQty] = useState<number | ''>('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [allocationError, setAllocationError] = useState<string | null>(null);
+
+  // Estados Canônicos de Registros Manuais e Auditoria
+  const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
+  const [manualEmpenhos, setManualEmpenhos] = useState<Empenho[]>([]);
+  const [manualContratos, setManualContratos] = useState<Contrato[]>([]);
+  const [contratoEmpenhoLinks, setContratoEmpenhoLinks] = useState<ContratoEmpenho[]>([]);
+  const [isManualEmpenhoModalOpen, setIsManualEmpenhoModalOpen] = useState<boolean>(false);
+  const [isManualContratoModalOpen, setIsManualContratoModalOpen] = useState<boolean>(false);
+  const [editingManualEmpenho, setEditingManualEmpenho] = useState<Empenho | null>(null);
+
+  const loadManualData = async () => {
+    try {
+      const emps = await fetchManualEmpenhos(itemKey);
+      setManualEmpenhos(emps);
+      const ctrs = await fetchManualContratos(itemKey);
+      setManualContratos(ctrs);
+      const links = await fetchContratoEmpenhoLinks(itemKey);
+      setContratoEmpenhoLinks(links);
+    } catch (e) {
+      console.warn('Erro ao carregar dados manuais:', e);
+    }
+  };
+
+  const handleSaveManualEmpenho = async (empData: Omit<Empenho, 'id' | 'criadoEm' | 'atualizadoEm'>) => {
+    let updated: Empenho[];
+    if (editingManualEmpenho) {
+      updated = manualEmpenhos.map(e =>
+        e.id === editingManualEmpenho.id
+          ? { ...e, ...empData, atualizadoEm: new Date().toISOString() }
+          : e
+      );
+    } else {
+      const newEmp: Empenho = {
+        ...empData,
+        id: `manual-emp-${Date.now()}`,
+        criadoEm: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString()
+      };
+      updated = [...manualEmpenhos, newEmp];
+    }
+    setManualEmpenhos(updated);
+    await saveManualEmpenhos(itemKey, updated);
+    setEditingManualEmpenho(null);
+  };
+
+  const handleDeleteManualEmpenho = async (empId: string) => {
+    if (window.confirm('Tem certeza que deseja excluir este empenho manual?')) {
+      const updated = manualEmpenhos.filter(e => e.id !== empId);
+      setManualEmpenhos(updated);
+      await saveManualEmpenhos(itemKey, updated);
+
+      const updatedLinks = contratoEmpenhoLinks.filter(l => l.empenhoId !== empId);
+      setContratoEmpenhoLinks(updatedLinks);
+      await saveContratoEmpenhoLinks(itemKey, updatedLinks);
+    }
+  };
+
+  const handleSaveManualContrato = async (
+    contratoData: Omit<Contrato, 'id' | 'criadoEm' | 'atualizadoEm'>,
+    selectedEmpenhoIds: string[]
+  ) => {
+    const newContratoId = `manual-contrato-${Date.now()}`;
+    const newContrato: Contrato = {
+      ...contratoData,
+      id: newContratoId,
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString()
+    };
+    const updatedContratos = [...manualContratos, newContrato];
+    setManualContratos(updatedContratos);
+    await saveManualContratos(itemKey, updatedContratos);
+
+    const newLinks: ContratoEmpenho[] = selectedEmpenhoIds.map(empId => ({
+      id: `link-${newContratoId}-${empId}`,
+      contratoId: newContratoId,
+      empenhoId: empId,
+      dataVinculo: new Date().toISOString(),
+      origem: 'MANUAL'
+    }));
+    const updatedLinks = [...contratoEmpenhoLinks, ...newLinks];
+    setContratoEmpenhoLinks(updatedLinks);
+    await saveContratoEmpenhoLinks(itemKey, updatedLinks);
+  };
+
+  const handleDeleteManualContrato = async (contratoId: string) => {
+    if (window.confirm('Tem certeza que deseja excluir este contrato manual?')) {
+      const updatedContratos = manualContratos.filter(c => c.id !== contratoId);
+      setManualContratos(updatedContratos);
+      await saveManualContratos(itemKey, updatedContratos);
+
+      const updatedLinks = contratoEmpenhoLinks.filter(l => l.contratoId !== contratoId);
+      setContratoEmpenhoLinks(updatedLinks);
+      await saveContratoEmpenhoLinks(itemKey, updatedLinks);
+    }
+  };
 
   // Cadastro de Unidades Oficiais
   const [departments, setDepartments] = useState<InternalDepartment[]>([]);
@@ -541,6 +640,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     loadContracts();
     loadAllocations();
     loadEmpenhoLinks();
+    loadManualData();
     loadAdesoes();
     loadDepartments();
   }, [item]);
@@ -659,17 +759,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     setAllocationError(null);
   };
 
-  const handleUpdateEmpenhoQuantity = async (empKey: string, newQty: number) => {
-    const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
-    const updatedManual = {
-      ...empenhoManualQuantities,
-      [empKey]: Math.max(0, newQty)
-    };
-    setEmpenhoManualQuantities(updatedManual);
-    await saveEmpenhoManualQuantities(itemKey, updatedManual);
-    await recalculateAllocationsWithLinks(empenhoLinks, updatedManual);
-  };
-
   const recalculateAllocationsWithLinks = async (
     linksMap: Record<string, string>,
     manualQtdsMap: Record<string, number> = empenhoManualQuantities
@@ -750,18 +839,110 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     );
   };
 
+  // Mapeia empenhos oficiais da API (SIASG e Contratos.gov/PNCP) para a entidade canônica Empenho
+  const officialApiEmpenhos: Empenho[] = React.useMemo(() => {
+    const list: Empenho[] = [];
+    const seen = new Set<string>();
+
+    empenhos.forEach((emp, idx) => {
+      const num = emp.numeroEmpenho || `EMP-${idx + 1}`;
+      const ano = parseInt(arp.anoCompra || '2026', 10);
+      const uasg = emp.unidade || arp.codigoUnidadeGerenciadora || '200331';
+      const key = `${normalizeEmpenhoNumero(num)}-${ano}-${uasg}-${item.numeroItem}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({
+          id: `api-siasg-${key}`,
+          numero: num,
+          ano,
+          arpId: item.numeroAtaRegistroPreco,
+          itemId: item.numeroItem,
+          uasg,
+          quantidade: Number(emp.quantidadeEmpenhada) || 0,
+          valorUnitario: Number(item.valorUnitario) || undefined,
+          valorTotal: Number(emp.valorEmpenhado) || (Number(emp.quantidadeEmpenhada) * Number(item.valorUnitario || 0)) || undefined,
+          data: emp.dataEmpenho || emp.dataHoraInclusao?.split('T')[0],
+          fornecedor: emp.fornecedorNome || item.nomeRazaoSocialFornecedor,
+          unidadeInternaId: empenhoLinks[num],
+          origem: 'API',
+          status: 'CONFIRMADO',
+          criadoEm: emp.dataHoraInclusao || new Date().toISOString(),
+          atualizadoEm: emp.dataHoraAtualizacao || new Date().toISOString()
+        });
+      }
+    });
+
+    Object.entries(contractGovEmpenhos).forEach(([, emps]) => {
+      emps.forEach(emp => {
+        const num = emp.numero;
+        if (!num) return;
+        const ano = parseInt(arp.anoCompra || '2026', 10);
+        const uasg = emp.unidade_gestora || arp.codigoUnidadeGerenciadora || '200331';
+        const key = `${normalizeEmpenhoNumero(num)}-${ano}-${uasg}-${item.numeroItem}`;
+        
+        const empKey = emp.numero || String(emp.id);
+        const qtdDetail = getEmpenhoQuantityInfo(empKey, emp, empenhoManualQuantities);
+        const effectiveQty = qtdDetail.qty;
+
+        if (!seen.has(key) && effectiveQty > 0) {
+          seen.add(key);
+          const rawVal = typeof emp.empenhado === 'number' ? emp.empenhado : parseFloat(String(emp.empenhado || '0').replace(/\./g, '').replace(',', '.'));
+          list.push({
+            id: `api-gov-${key}`,
+            numero: num,
+            ano,
+            arpId: item.numeroAtaRegistroPreco,
+            itemId: item.numeroItem,
+            uasg,
+            quantidade: effectiveQty,
+            valorUnitario: Number(item.valorUnitario) || undefined,
+            valorTotal: !isNaN(rawVal) && rawVal > 0 ? rawVal : (effectiveQty * Number(item.valorUnitario || 0)),
+            data: emp.data_emissao,
+            fornecedor: emp.credor || item.nomeRazaoSocialFornecedor,
+            unidadeInternaId: empenhoLinks[num],
+            origem: 'API',
+            status: 'CONFIRMADO',
+            criadoEm: new Date().toISOString(),
+            atualizadoEm: new Date().toISOString()
+          });
+        }
+      });
+    });
+
+    return list;
+  }, [empenhos, contractGovEmpenhos, empenhoLinks, item, arp, empenhoManualQuantities]);
+
+  // Lista Unificada de Empenhos com Matching e Promoção Inteligente
+  const allEmpenhos: Empenho[] = React.useMemo(() => {
+    return matchAndMergeEmpenhos(officialApiEmpenhos, manualEmpenhos);
+  }, [officialApiEmpenhos, manualEmpenhos]);
+
   // Calculate totals
   const totalRegistrado = unidades.reduce((acc, curr) => acc + curr.quantidadeRegistrada, 0);
   const totalSaldoRemanejamento = unidades.reduce((acc, curr) => acc + curr.saldoRemanejamentoEmpenho, 0);
   const totalLimiteAdesao = unidades.reduce((acc, curr) => acc + curr.qtdLimiteAdesao, 0);
   const totalSaldoAdesoes = unidades.reduce((acc, curr) => acc + curr.saldoAdesoes, 0);
 
+  // Relatório de Reconciliação Contábil Oficial do Item
+  const reconciliationReport: ReconciliationReport = React.useMemo(() => {
+    return reconcileBalances(
+      item.quantidadeHomologadaItem,
+      allEmpenhos,
+      totalSaldoRemanejamento > 0 ? totalSaldoRemanejamento : null
+    );
+  }, [item.quantidadeHomologadaItem, allEmpenhos, totalSaldoRemanejamento]);
+
+  // Fórmula Oficial do Saldo: Saldo = QuantidadeRegistrada - ∑ Empenhos
+  const totalCalculatedEmpenhado = calculateTotalEmpenhado(allEmpenhos);
+  const officialCalculatedSaldo = calculateSaldo(item.quantidadeHomologadaItem, allEmpenhos);
+
   // Consumed calculations
-  const totalConsumidoEmpenho = totalRegistrado - totalSaldoRemanejamento;
+  const totalConsumidoEmpenho = totalCalculatedEmpenhado;
   const totalConsumidoAdesao = totalLimiteAdesao - totalSaldoAdesoes;
 
   // Percentage calculations
-  const empenhoPercent = totalRegistrado > 0 ? (totalSaldoRemanejamento / totalRegistrado) * 100 : 0;
+  const itemTotalQty = item.quantidadeHomologadaItem || totalRegistrado;
+  const empenhoPercent = itemTotalQty > 0 ? (Math.max(0, officialCalculatedSaldo) / itemTotalQty) * 100 : 0;
   const empenhoConsumidoPercent = 100 - empenhoPercent;
   const adsPercVal = totalLimiteAdesao > 0 ? (totalSaldoAdesoes / totalLimiteAdesao) * 100 : 0;
   const adsConsPercVal = 100 - adsPercVal;
@@ -872,6 +1053,19 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         </div>
       </section>
 
+      {/* Executive Item Reconciliation Audit Card */}
+      {!loading && (
+        <ItemReconciliationCard
+          report={reconciliationReport}
+          onRefresh={() => {
+            loadEmpenhos();
+            loadContracts();
+            loadManualData();
+          }}
+          isLoading={loading || contractsLoading}
+        />
+      )}
+
       {/* Global item balance metrics */}
       {!loading && !error && (
         <section className="balances-header-grid">
@@ -884,10 +1078,10 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
               <span className="meta-label">Saldo p/ Empenho / Remanejamento</span>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: '0.25rem' }}>
                 <span className="balance-val" style={{ color: 'var(--text-primary)' }}>
-                  {formatNumber(totalSaldoRemanejamento)}
+                  {formatNumber(officialCalculatedSaldo)}
                 </span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  de {formatNumber(totalRegistrado)} un
+                  de {formatNumber(itemTotalQty)} un
                 </span>
               </div>
               
@@ -1156,12 +1350,20 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         ) : activeTab === 'empenhos' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             
-            {/* Section 1: Contratos (PNCP) */}
+            {/* Section 1: Contratos (PNCP e Manuais) */}
             <div className="glass-card" style={{ padding: '1.25rem', background: '#f8fafc', borderColor: '#e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}>
-                  <Building2 size={16} /> Contratos Celebrados (PNCP)
+                  <Building2 size={16} /> Contratos Celebrados (PNCP e Manuais)
                 </h4>
+                <button
+                  type="button"
+                  onClick={() => setIsManualContratoModalOpen(true)}
+                  className="btn btn-primary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: '4px' }}
+                >
+                  <Plus size={14} /> Adicionar Contrato
+                </button>
               </div>
 
               {contractsLoading ? (
@@ -1173,35 +1375,68 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                 <div style={{ padding: '1rem', color: 'var(--danger)', fontSize: '0.85rem', textAlign: 'center' }}>
                   ⚠️ {contractsError}
                 </div>
-              ) : contracts.length === 0 ? (
+              ) : (contracts.length === 0 && manualContratos.length === 0) ? (
                 <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', background: '#ffffff', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
-                  Nenhum contrato cadastrado no PNCP para esta Ata de Registro de Preços.
+                  Nenhum contrato cadastrado no PNCP ou manualmente para esta Ata.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  {/* Função auxiliar para renderizar cada seção de contratos */}
                   {[
                     {
                       title: 'Unidade Gestora (Gerenciadora)',
                       icon: <Building2 size={16} color="var(--primary)" />,
-                      list: contracts.filter(c => {
-                        const u = String(c.uasg || '').trim();
-                        if (u === '200331' || u === '200330') return true;
-                        if (c.tipoUnidade === 'GERENCIADORA') return true;
-                        return false;
-                      }),
+                      list: [
+                        ...contracts.filter(c => {
+                          const u = String(c.uasg || '').trim();
+                          if (u === '200331' || u === '200330') return true;
+                          if (c.tipoUnidade === 'GERENCIADORA') return true;
+                          return false;
+                        }),
+                        ...manualContratos
+                          .filter(mc => mc.uasg === '200331' || mc.uasg === '200330')
+                          .map(mc => ({
+                            numeroContrato: mc.numero,
+                            anoContrato: mc.ano,
+                            uasg: mc.uasg,
+                            orgaoNome: 'SENASP / MJSP',
+                            nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
+                            niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
+                            numeroControlePncp: mc.numeroControlePncp,
+                            linkVisualizacao: mc.linkPncp,
+                            tipoUnidade: 'GERENCIADORA',
+                            _isManual: true,
+                            _manualId: mc.id
+                          } as any))
+                      ],
                       badgeClass: 'badge-info',
                       badgeLabel: 'Órgão Gerenciador'
                     },
                     {
                       title: 'Participantes',
                       icon: <Users size={16} color="#0f766e" />,
-                      list: contracts.filter(c => {
-                        const u = String(c.uasg || '').trim();
-                        if (u === '200331' || u === '200330') return false;
-                        if (c.tipoUnidade === 'GERENCIADORA') return false;
-                        return true;
-                      }),
+                      list: [
+                        ...contracts.filter(c => {
+                          const u = String(c.uasg || '').trim();
+                          if (u === '200331' || u === '200330') return false;
+                          if (c.tipoUnidade === 'GERENCIADORA') return false;
+                          return true;
+                        }),
+                        ...manualContratos
+                          .filter(mc => mc.uasg !== '200331' && mc.uasg !== '200330')
+                          .map(mc => ({
+                            numeroContrato: mc.numero,
+                            anoContrato: mc.ano,
+                            uasg: mc.uasg,
+                            orgaoNome: `UASG ${mc.uasg}`,
+                            nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
+                            niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
+                            numeroControlePncp: mc.numeroControlePncp,
+                            linkVisualizacao: mc.linkPncp,
+                            tipoUnidade: 'PARTICIPANTE',
+                            _isManual: true,
+                            _manualId: mc.id
+                          } as any))
+                      ],
                       badgeClass: 'badge-success',
                       badgeLabel: 'Órgãos Participantes'
                     }
@@ -1227,14 +1462,15 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                               <tr>
                                 <th style={{ width: '40px' }}></th>
                                 <th>Número do contrato</th>
-                                <th>Órgão</th>
+                                <th>Órgão / UASG</th>
                                 <th>Fornecedor</th>
                                 <th>Quantidade contratada</th>
+                                <th>Origem</th>
                                 <th style={{ textAlign: 'center' }}>Ação</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {section.list.map((c, idx) => {
+                              {section.list.map((c: any, idx) => {
                                 const contractUrl = c.linkVisualizacao || getContractPncpUrl(c);
                                 const canKey = getCanonicalContractKey(c.numeroContrato, c.anoContrato, c.numeroControlePncp);
                                 const isExpanded = !!expandedContracts[c.numeroContrato] || !!expandedContracts[canKey];
@@ -1242,7 +1478,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                 const pncpEmps = contractEmpenhos[c.numeroContrato] || contractEmpenhos[canKey];
                                 const isLoadingEmps = !!empenhosLoadingMap[c.numeroContrato] || !!empenhosLoadingMap[canKey];
 
-                                // 2 - Incluir ano depois do Número do Contrato
                                 const displayNumeroContrato = (() => {
                                   const num = c.numeroContrato;
                                   if (!num) return '-';
@@ -1251,7 +1486,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                   return c.anoContrato ? `${num}/${c.anoContrato}` : num;
                                 })();
 
-                                // 3 - Incluir a UASG depois do Órgão
                                 const isGer = section.title.includes('Gerenciadora');
                                 const contractUasg = c.uasg || (isGer ? (arp.codigoUnidadeGerenciadora || '200331') : '');
 
@@ -1279,9 +1513,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                             </span>
                                           ) : null}
                                         </div>
-                                        {c.unidadeNome && c.orgaoNome && c.unidadeNome !== c.orgaoNome && (
-                                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{c.unidadeNome}</div>
-                                        )}
                                       </td>
                                       <td style={{ fontSize: '0.82rem' }}>
                                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.nomeRazaoSocialFornecedor}</div>
@@ -1298,28 +1529,49 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                           </span>
                                         )}
                                       </td>
-                                      <td style={{ textAlign: 'center' }}>
-                                        {contractUrl ? (
-                                          <a 
-                                            href={contractUrl} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer" 
-                                            className="btn btn-secondary"
-                                            style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', height: 'auto', border: '1px solid var(--border-color)', color: 'var(--primary)' }}
-                                            title="Visualizar contrato no portal oficial"
-                                          >
-                                            <ExternalLink size={14} /> Visualizar
-                                          </a>
+                                      <td>
+                                        {c._isManual ? (
+                                          <span style={{ background: '#fefce8', color: '#a16207', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                            🟡 Manual
+                                          </span>
                                         ) : (
-                                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>-</span>
+                                          <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                            🟢 Oficial
+                                          </span>
                                         )}
+                                      </td>
+                                      <td style={{ textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                                          {contractUrl ? (
+                                            <a 
+                                              href={contractUrl} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer" 
+                                              className="btn btn-secondary"
+                                              style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', height: 'auto', border: '1px solid var(--border-color)', color: 'var(--primary)' }}
+                                              title="Visualizar contrato no portal oficial"
+                                            >
+                                              <ExternalLink size={14} /> Visualizar
+                                            </a>
+                                          ) : null}
+                                          {c._isManual && c._manualId && (
+                                            <button
+                                              onClick={() => handleDeleteManualContrato(c._manualId)}
+                                              className="btn btn-secondary"
+                                              style={{ padding: '0.3rem 0.5rem', color: '#b91c1c', border: '1px solid #fecaca', background: '#fef2f2', borderRadius: '4px' }}
+                                              title="Excluir contrato manual"
+                                            >
+                                              <Trash2 size={13} />
+                                            </button>
+                                          )}
+                                        </div>
                                       </td>
                                     </tr>
                                     
                                     {/* Nested Expandable Commitments (Empenhos) Row */}
                                     {isExpanded && (
                                       <tr>
-                                        <td colSpan={6} style={{ padding: '0 0 1rem 0', background: '#f8fafc' }}>
+                                        <td colSpan={7} style={{ padding: '0 0 1rem 0', background: '#f8fafc' }}>
                                           <div style={{ padding: '1rem', marginLeft: '2.5rem', marginRight: '1rem', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
                                             <h5 style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                               <DollarSign size={14} color="var(--primary)" /> Empenhos Vinculados a este Contrato ({govEmps?.length || pncpEmps?.length || 0})
@@ -1340,20 +1592,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '200px' }}>Unidade Interna</th>
                                                       <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '140px' }}>Qtd Física (Item)</th>
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Data de Emissão</th>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Plano Interno / Natureza</th>
                                                       <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Empenhado</th>
-                                                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor a Liquidar</th>
-                                                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Liquidado</th>
-                                                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Pago</th>
                                                     </tr>
                                                   </thead>
                                                   <tbody>
                                                     {govEmps.map((emp, eidx) => {
-                                                      const parseVal = (v: any) => {
-                                                        if (typeof v === 'number') return v;
-                                                        const n = parseFloat(String(v || '0').replace(/\./g, '').replace(',', '.'));
-                                                        return isNaN(n) ? 0 : n;
-                                                      };
                                                       const currentLinkId = empenhoLinks[emp.numero] || (emp.id ? empenhoLinks[String(emp.id)] : '') || '';
                                                       const empKey = emp.numero || String(emp.id);
                                                       const qtyInfo = getEmpenhoQuantityInfo(empKey, emp);
@@ -1392,112 +1635,12 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                               </select>
                                                             )}
                                                           </td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem' }}>
-                                                              <input 
-                                                                type="number"
-                                                                min="0"
-                                                                disabled={qtyInfo.isOfficial}
-                                                                readOnly={qtyInfo.isOfficial}
-                                                                className="form-input"
-                                                                value={qtyInfo.qty}
-                                                                onChange={(e) => {
-                                                                  if (qtyInfo.isOfficial) return;
-                                                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                                                  handleUpdateEmpenhoQuantity(empKey, val);
-                                                                }}
-                                                                style={{
-                                                                  width: '70px',
-                                                                  padding: '0.15rem 0.3rem',
-                                                                  fontSize: '0.78rem',
-                                                                  textAlign: 'center',
-                                                                  fontWeight: 700,
-                                                                  color: qtyInfo.isOfficial ? '#15803d' : (qtyInfo.isManual ? '#b45309' : 'var(--text-primary)'),
-                                                                  borderColor: qtyInfo.isOfficial ? '#86efac' : (qtyInfo.isManual ? '#f59e0b' : '#cbd5e1'),
-                                                                  background: qtyInfo.isOfficial ? '#f0fdf4' : (qtyInfo.isManual ? '#fffbeb' : '#ffffff'),
-                                                                  cursor: qtyInfo.isOfficial ? 'not-allowed' : 'text',
-                                                                  opacity: qtyInfo.isOfficial ? 0.95 : 1
-                                                                }}
-                                                                title={qtyInfo.isOfficial ? 'Quantidade física oficial da API (Somente leitura)' : (qtyInfo.isManual ? 'Quantidade informada manualmente' : 'Informe a quantidade física deste empenho')}
-                                                              />
-                                                              <span style={{ fontSize: '0.68rem', fontWeight: 600, color: qtyInfo.isOfficial ? '#15803d' : (qtyInfo.isManual ? '#b45309' : '#94a3b8') }}>
-                                                                {qtyInfo.isOfficial ? 'Oficial' : (qtyInfo.isManual ? 'Manual' : 'un')}
-                                                              </span>
-                                                            </div>
+                                                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 700, color: 'var(--success)' }}>
+                                                            {formatNumber(qtyInfo.qty)} un
                                                           </td>
                                                           <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{formatDate(emp.data_emissao)}</td>
-                                                          <td style={{ padding: '6px 8px', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                                                            <div>{emp.planointerno || '-'}</div>
-                                                            <div>{emp.naturezadespesa || ''}</div>
-                                                          </td>
                                                           <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>
-                                                            {formatCurrency(parseVal(emp.empenhado))}
-                                                          </td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--warning)', fontFamily: 'monospace' }}>
-                                                            {formatCurrency(parseVal(emp.aliquidar))}
-                                                          </td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--primary)', fontFamily: 'monospace' }}>
-                                                            {formatCurrency(parseVal(emp.liquidado))}
-                                                          </td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
-                                                            {formatCurrency(parseVal(emp.pago))}
-                                                          </td>
-                                                        </tr>
-                                                      );
-                                                    })}
-                                                  </tbody>
-                                                </table>
-                                              </div>
-                                            ) : pncpEmps && pncpEmps.length > 0 ? (
-                                              <div style={{ overflowX: 'auto' }}>
-                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', marginTop: '0.25rem' }}>
-                                                  <thead>
-                                                    <tr style={{ borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>N.º Empenho</th>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Órgão / UG</th>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '200px' }}>Unidade Interna</th>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Data de Emissão</th>
-                                                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Total</th>
-                                                    </tr>
-                                                  </thead>
-                                                  <tbody>
-                                                    {pncpEmps.map((emp, eidx) => {
-                                                      const currentLinkId = empenhoLinks[emp.numeroEmpenho] || '';
-                                                      return (
-                                                        <tr key={`${emp.numeroEmpenho}-${eidx}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                                          <td style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--text-primary)' }}>{emp.numeroEmpenho}</td>
-                                                          <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{c.orgaoNome || c.unidadeNome || '-'}</td>
-                                                          <td style={{ padding: '6px 8px' }}>
-                                                            {allocations.length === 0 ? (
-                                                              <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Sem unidades cadastradas</span>
-                                                            ) : (
-                                                              <select
-                                                                value={currentLinkId}
-                                                                onChange={(e) => handleLinkEmpenho(emp.numeroEmpenho, e.target.value)}
-                                                                className="form-input"
-                                                                style={{
-                                                                  padding: '0.2rem 0.4rem',
-                                                                  fontSize: '0.75rem',
-                                                                  height: 'auto',
-                                                                  width: '100%',
-                                                                  maxWidth: '220px',
-                                                                  borderColor: currentLinkId ? 'var(--primary)' : '#cbd5e1',
-                                                                  background: currentLinkId ? '#eff6ff' : '#ffffff',
-                                                                  fontWeight: currentLinkId ? 600 : 400
-                                                                }}
-                                                              >
-                                                                <option value="">Não vinculado</option>
-                                                                {allocations.map(a => (
-                                                                  <option key={a.id} value={a.id}>
-                                                                    {a.unitName} (Saldo: {formatNumber(a.allocatedQty - a.empenhadaQty)} un)
-                                                                  </option>
-                                                                ))}
-                                                              </select>
-                                                            )}
-                                                          </td>
-                                                          <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{formatDate(emp.dataEmissaoEmpenho)}</td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>
-                                                            {formatCurrency(emp.valorTotal)}
+                                                            {formatCurrency(typeof emp.empenhado === 'number' ? emp.empenhado : parseFloat(String(emp.empenhado || '0').replace(/\./g, '').replace(',', '.')))}
                                                           </td>
                                                         </tr>
                                                       );
@@ -1507,7 +1650,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                               </div>
                                             ) : (
                                               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '0.5rem 0' }}>
-                                                Nenhum empenho publicado para este contrato.
+                                                Nenhum empenho detalhado para este contrato.
                                               </div>
                                             )}
                                           </div>
@@ -1523,6 +1666,157 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Todas as Notas de Empenho Conhecidas (Consumo Real de Saldo) */}
+            <div className="glass-card" style={{ padding: '1.25rem', background: '#f8fafc', borderColor: '#e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}>
+                    <DollarSign size={16} /> Notas de Empenho Conhecidas (Consumo de Saldo)
+                  </h4>
+                  <span className="badge badge-info" style={{ fontSize: '0.72rem' }}>
+                    {allEmpenhos.length} {allEmpenhos.length === 1 ? 'empenho' : 'empenhos'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingManualEmpenho(null);
+                    setIsManualEmpenhoModalOpen(true);
+                  }}
+                  className="btn btn-primary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: '4px' }}
+                >
+                  <Plus size={14} /> Adicionar Empenho
+                </button>
+              </div>
+
+              {allEmpenhos.length === 0 ? (
+                <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', background: '#ffffff', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                  Nenhum empenho localizado na API ou cadastrado manualmente. Clique em <strong>"+ Adicionar Empenho"</strong> para registrar uma Nota de Empenho.
+                </div>
+              ) : (
+                <div className="table-container" style={{ marginTop: 0, overflowX: 'auto', background: '#ffffff', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                  <table className="custom-table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>N.º do Empenho</th>
+                        <th>Ano</th>
+                        <th>UASG / Órgão</th>
+                        <th>Unidade Interna (Alocação)</th>
+                        <th style={{ textAlign: 'center' }}>Qtd Física (Item)</th>
+                        <th style={{ textAlign: 'right' }}>Valor Total</th>
+                        <th style={{ textAlign: 'center' }}>Origem & Confiança</th>
+                        <th style={{ textAlign: 'center' }}>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allEmpenhos.map((emp) => {
+                        const currentLinkId = emp.unidadeInternaId || empenhoLinks[emp.numero] || '';
+                        const isManual = emp.origem === 'MANUAL';
+                        const isSincronizado = emp.origem === 'SINCRONIZADO';
+                        const isDivergente = emp.status === 'DIVERGENTE';
+
+                        return (
+                          <tr key={emp.id}>
+                            <td style={{ fontWeight: 700, fontFamily: 'monospace', color: '#0c326f', fontSize: '0.85rem' }}>
+                              {emp.numero}
+                            </td>
+                            <td style={{ fontSize: '0.82rem' }}>{emp.ano}</td>
+                            <td style={{ fontSize: '0.82rem' }}>
+                              <span style={{ fontWeight: 600 }}>UASG {emp.uasg}</span>
+                              {emp.fornecedor && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{emp.fornecedor}</div>
+                              )}
+                            </td>
+                            <td>
+                              {allocations.length === 0 ? (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Sem unidades cadastradas</span>
+                              ) : (
+                                <select
+                                  value={currentLinkId}
+                                  onChange={(e) => handleLinkEmpenho(emp.numero, e.target.value)}
+                                  className="form-input"
+                                  style={{
+                                    padding: '0.2rem 0.4rem',
+                                    fontSize: '0.75rem',
+                                    height: 'auto',
+                                    width: '100%',
+                                    maxWidth: '220px',
+                                    borderColor: currentLinkId ? 'var(--primary)' : '#cbd5e1',
+                                    background: currentLinkId ? '#eff6ff' : '#ffffff',
+                                    fontWeight: currentLinkId ? 600 : 400
+                                  }}
+                                >
+                                  <option value="">Não vinculado</option>
+                                  {allocations.map(a => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.unitName} (Saldo: {formatNumber(a.allocatedQty - a.empenhadaQty)} un)
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--success)', fontFamily: 'monospace', fontSize: '0.88rem' }}>
+                              {formatNumber(emp.quantidade)} un
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                              {emp.valorTotal ? formatCurrency(emp.valorTotal) : '-'}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {isDivergente ? (
+                                <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                  🔴 Divergente
+                                </span>
+                              ) : isSincronizado ? (
+                                <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                  🔵 Sincronizado
+                                </span>
+                              ) : isManual ? (
+                                <span style={{ background: '#fefce8', color: '#a16207', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                  🟡 Manual
+                                </span>
+                              ) : (
+                                <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                  🟢 Oficial
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {isManual ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}>
+                                  <button
+                                    onClick={() => {
+                                      setEditingManualEmpenho(emp);
+                                      setIsManualEmpenhoModalOpen(true);
+                                    }}
+                                    className="btn btn-secondary"
+                                    style={{ padding: '0.25rem 0.4rem', fontSize: '0.75rem' }}
+                                    title="Editar empenho manual"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteManualEmpenho(emp.id)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: '0.25rem 0.4rem', fontSize: '0.75rem', color: '#b91c1c', border: '1px solid #fecaca', background: '#fef2f2' }}
+                                    title="Excluir empenho manual"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -2137,6 +2431,36 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
           loadDepartments();
           loadAllocations();
         }}
+      />
+
+      {/* Modal de Cadastro/Edição de Empenho Manual */}
+      <ManualEmpenhoModal
+        isOpen={isManualEmpenhoModalOpen}
+        onClose={() => {
+          setIsManualEmpenhoModalOpen(false);
+          setEditingManualEmpenho(null);
+        }}
+        onSave={handleSaveManualEmpenho}
+        arpId={arp.numeroAtaRegistroPreco}
+        itemId={item.numeroItem}
+        defaultUasg={arp.codigoUnidadeGerenciadora || '200331'}
+        defaultFornecedor={item.nomeRazaoSocialFornecedor}
+        defaultCnpj={item.niFornecedor}
+        defaultValorUnitario={item.valorUnitario}
+        initialEmpenho={editingManualEmpenho}
+      />
+
+      {/* Modal de Cadastro de Contrato Manual com Vínculo Obrigatório */}
+      <ManualContratoModal
+        isOpen={isManualContratoModalOpen}
+        onClose={() => setIsManualContratoModalOpen(false)}
+        onSave={handleSaveManualContrato}
+        arpId={arp.numeroAtaRegistroPreco}
+        itemId={item.numeroItem}
+        defaultUasg={arp.codigoUnidadeGerenciadora || '200331'}
+        defaultFornecedor={item.nomeRazaoSocialFornecedor}
+        defaultCnpj={item.niFornecedor}
+        availableEmpenhos={allEmpenhos}
       />
     </div>
   );

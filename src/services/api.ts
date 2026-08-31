@@ -554,6 +554,7 @@ export interface FallbackPurchaseParams {
   codigoModalidadeCompra?: string;
   dataVigenciaInicial?: string;
   numeroControlePncpCompra?: string;
+  numeroControlePncpAta?: string;
 }
 
 export interface SupplierFilterInfo {
@@ -691,26 +692,28 @@ export async function fetchPncpContracts(
   fornecedorInfo?: SupplierFilterInfo
 ): Promise<PncpContract[]> {
   const contractsMergedMap = new Map<string, any>();
-  const effectiveCnpj = cnpj || '00394494000136';
+  const effectiveCnpj = (cnpj || fallbackParams?.numeroControlePncpCompra?.match(/^(\d{14})/)?.[1] || fallbackParams?.numeroControlePncpAta?.match(/^(\d{14})/)?.[1] || '').trim();
 
-  // 1. Consulta contratos diretos da Contratação/Compra no PNCP
-  try {
-    const purchaseContractsUrl = `/api-pncp/api/pncp/v1/orgaos/${effectiveCnpj}/compras/${ano}/${sequencial}/contratos`;
-    const res = await fetch(purchaseContractsUrl);
-    if (res.ok) {
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
-      list.forEach((c: any) => {
-        const canKey = getCanonicalContractKey(c.numeroContrato || c.numeroContratoEmpenho || c.numero, c.anoContrato || ano, c.numeroControlePNCP || c.numeroControlePncpContrato);
-        if (canKey) contractsMergedMap.set(canKey, { ...c, _fromPncp: true });
-      });
+  // 1. Consulta contratos diretos da Contratação/Compra no PNCP (apenas se CNPJ e sequencial válidos)
+  if (effectiveCnpj && ano && sequencial) {
+    try {
+      const purchaseContractsUrl = `/api-pncp/api/pncp/v1/orgaos/${effectiveCnpj}/compras/${ano}/${sequencial}/contratos`;
+      const res = await fetch(purchaseContractsUrl);
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+        list.forEach((c: any) => {
+          const canKey = getCanonicalContractKey(c.numeroContrato || c.numeroContratoEmpenho || c.numero, c.anoContrato || ano, c.numeroControlePNCP || c.numeroControlePncpContrato);
+          if (canKey) contractsMergedMap.set(canKey, { ...c, _fromPncp: true });
+        });
+      }
+    } catch (e) {
+      console.warn("Falha na consulta de contratos da contratação no PNCP", e);
     }
-  } catch (e) {
-    console.warn("Falha na consulta de contratos da contratação no PNCP", e);
   }
 
   // 2. Consulta contratos associados à Ata no PNCP (se sequencialAta disponível)
-  if (sequencialAta) {
+  if (effectiveCnpj && ano && sequencial && sequencialAta) {
     try {
       const ataContractsUrl = `/api-pncp/api/pncp/v1/orgaos/${effectiveCnpj}/compras/${ano}/${sequencial}/atas/${sequencialAta}/contratos`;
       const res = await fetch(ataContractsUrl);
