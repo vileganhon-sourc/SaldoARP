@@ -1,525 +1,137 @@
 ---
 name: arp-loop-validator
-description: Executa um ciclo autônomo de engenharia para implementar, validar e corrigir módulos do SaldoARP com loop TDD, validação contábil, integridade de dados e comprovação de critérios até satisfação do /goal.
+description: Executa um ciclo autônomo de engenharia em arquitetura multiagente (Orquestrador, Implementador, Verificador) para implementar, validar, auditar e comprovar regras contábeis e de software do SaldoARP até aprovação formal.
 ---
 
 # arp-loop-validator
 
 ## Objetivo
 
-Executar um ciclo autônomo de engenharia para implementar, validar e corrigir
-um módulo de software até que o `/goal` seja comprovadamente satisfeito.
-
-A Skill deve:
-
-1. inspecionar o estado atual do projeto;
-2. identificar as regras e critérios de aceitação definidos no `/goal`;
-3. compilar/buildar o projeto;
-4. executar lint/typecheck quando disponíveis;
-5. executar testes automatizados;
-6. validar explicitamente as regras de negócio;
-7. identificar falhas;
-8. corrigir a implementação;
-9. executar novamente os testes;
-10. repetir o ciclo até que todos os critérios verificáveis do `/goal` sejam satisfeitos.
-
-A Skill NÃO deve considerar "código escrito" como sinônimo de "objetivo concluído".
+Executar um ciclo autônomo e adversarial de engenharia de software para implementar, validar e corrigir módulos do **SaldoARP** até que todos os critérios do `/goal` sejam formalmente comprovados e aprovados pelo Verificador independente.
 
 ---
 
-# 1. PRINCÍPIO FUNDAMENTAL
+# 1. ARQUITETURA MULTIAGENTE DO LOOP
 
-O `/goal` define O QUE deve estar pronto.
+```
+                     /goal (Requisitos & Invariantes)
+                                   │
+                                   ▼
+                         ┌───────────────────┐
+                         │   ORQUESTRADOR    │
+                         │                   │
+                         │ Coordena o ciclo  │
+                         └─────────┬─────────┘
+                                   │
+                            ┌──────▼──────┐
+                            │IMPLEMENTADOR│
+                            │             │
+                            │ Cria código │
+                            │ Cria testes │
+                            └──────┬──────┘
+                                   │
+                            código / testes
+                                   │
+                                   ▼
+                         ┌───────────────────┐
+                         │    VERIFICADOR    │
+                         │                   │
+                         │ Auditoria Crítica │
+                         │ Tenta quebrar a   │
+                         │ implementação     │
+                         └─────────┬─────────┘
+                                   │
+                         ┌─────────┴─────────┐
+                         │                   │
+                      REPROVA              APROVA
+                         │                   │
+                         ▼                   ▼
+                   FEEDBACK OBJETIVO      STATUS: DONE
+                         │             (Confiança ALTA)
+                         └──────► IMPLEMENTADOR
+```
 
-A Skill define COMO validar e corrigir até que esteja pronto.
+### 1.1. Subagente: `orquestrador`
+- **Papel**: Maestro do loop.
+- **Função**: Envia requisitos ao Implementador, repassa a entrega ao Verificador, coleta feedbacks de reprovação, impede loops infinitos e declara o encerramento quando aprovado pelo Verificador.
 
-Nunca substituir critérios explícitos do `/goal` por uma interpretação subjetiva de "parece funcionar".
+### 1.2. Subagente: `implementador`
+- **Papel**: Construtor técnico.
+- **Função**: Escreve código, modela schemas, implementa serviços, cria testes locais e entrega ao Verificador com a mensagem: `"IMPLEMENTAÇÃO ENTREGUE PARA VERIFICAÇÃO."` (nunca se autoaprova).
 
-Um objetivo só pode ser declarado DONE quando houver evidência verificável.
-
----
-
-# 2. FLUXO PRINCIPAL
-
-Executar continuamente o seguinte ciclo:
-
-INSPECIONAR
-→ COMPILAR
-→ TESTAR
-→ VALIDAR REGRAS
-→ ANALISAR FALHAS
-→ CORRIGIR
-→ COMPILAR
-→ TESTAR
-→ VALIDAR
-→ repetir
-
-Parar somente quando:
-
-* todos os critérios do `/goal` estiverem satisfeitos;
-* build/compilação estiver funcionando;
-* typecheck estiver funcionando, quando disponível;
-* lint estiver funcionando, quando disponível;
-* testes relevantes estiverem passando;
-* testes de regressão estiverem passando;
-* regras críticas de negócio estiverem validadas;
-* não existirem falhas conhecidas não justificadas.
-
----
-
-# 3. ETAPA 1 — INSPECIONAR
-
-Antes de alterar código:
-
-* identificar stack tecnológica;
-* identificar package manager;
-* identificar scripts disponíveis;
-* localizar testes existentes;
-* localizar arquivos relacionados ao módulo;
-* localizar serviços;
-* localizar componentes;
-* localizar schema/migrations;
-* identificar integrações externas;
-* identificar regras de negócio existentes;
-* identificar possíveis mocks, fallbacks ou dados hardcoded.
-
-Não reescrever código sem necessidade.
-
-Preservar funcionalidades existentes.
-
-Preferir alterações pequenas, rastreáveis e reversíveis.
+### 1.3. Subagente: `verificador`
+- **Papel**: Auditor independente e adversarial.
+- **Função**: Executa testes adversariais, verifica capacidade de falha, inspeciona ausência de dados fictícios e é a **única autoridade que pode emitir `APPROVED`** para encerrar o ciclo.
 
 ---
 
-# 4. ETAPA 2 — INTERPRETAR O /goal
+# 2. INVARIANTES CONTÁBEIS DO SALDOARP
 
-Transformar o `/goal` em uma checklist verificável.
+Na validação de itens de Ata de Registro de Preços, aplicar estritamente:
 
-Classificar cada requisito como:
-
-* FUNCTIONAL
-* BUSINESS_RULE
-* DATA_INTEGRITY
-* API_INTEGRATION
-* UI
-* TEST
-* REGRESSION
-* SECURITY
-* PERFORMANCE
-
-Para cada requisito, identificar:
-
-* entrada;
-* condição;
-* resultado esperado;
-* teste correspondente.
-
-Se um requisito crítico não possuir forma objetiva de validação, criar uma estratégia de validação antes de declarar conclusão.
+1. **Fórmula Oficial**:
+   $$\mathbf{SaldoARP} = \mathbf{QuantidadeRegistrada} - \sum \mathbf{Empenhos}$$
+2. **Isolamento de Contratos**: Contratos **NUNCA** reduzem o saldo da Ata diretamente.
+3. **Isolamento de Alocações Internas**: Alocações **NUNCA** reduzem o saldo da Ata ($\text{SaldoAlocação} = \text{Cota} - \sum \text{EmpenhosDoDepto}$).
+4. **Cardinalidade e Travas**:
+   - $1 \text{ Item} \to N \text{ Empenhos}$.
+   - Empenho sem Contrato = **VÁLIDO**.
+   - Contrato sem Empenho = **INVÁLIDO** (salvamento bloqueado).
+   - Vínculo de empenho a múltiplos contratos **NÃO duplica** o empenho consumido.
+5. **Reconciliação e Não-Interferência**:
+   - Compara Saldo Calculado x Saldo Informado pela API.
+   - Discrepâncias são sinalizadas com o delta numérico explícito (`⚠️ Divergência de X un`), sem auto-correção forçada.
+6. **Matriz de Confiança**:
+   - 🟢 Oficial (API) | 🟡 Manual (Usuário) | 🔵 Sincronizado (Manual confirmado pela API) | 🔴 Divergente.
+7. **Proibição de Dados Artificiais**:
+   - Nunca fabricar contratos, empenhos, CNPJs, nem gerar `numeroControlePncp` sintético se a API não retornar.
 
 ---
 
-# 5. ETAPA 3 — COMPILAR
+# 3. MATRIZ DOS 20 TESTES OBRIGATÓRIOS
 
-Executar os comandos adequados ao projeto.
+Toda suíte de testes de saldo deve conter obrigatoriamente os seguintes 20 cenários verificáveis (capazes de falhar se a implementação estiver incorreta):
 
-Exemplos:
-
-* npm run build
-* npm run typecheck
-* npm run lint
-
-Usar os scripts realmente existentes no projeto.
-
-Não inventar comandos.
-
-Se a compilação falhar:
-
-1. identificar a causa;
-2. corrigir;
-3. executar novamente.
-
-Não prosseguir para DONE enquanto erros introduzidos pelo trabalho permanecerem.
-
----
-
-# 6. ETAPA 4 — TESTAR
-
-Executar:
-
-1. testes unitários;
-2. testes de integração;
-3. testes de regras de negócio;
-4. testes de regressão disponíveis.
-
-Quando não houver testes suficientes para uma regra crítica:
-
-* criar o teste;
-* executar;
-* confirmar que o teste é significativo;
-* corrigir a implementação;
-* executar novamente.
+| Nº | Regra / Cenário | Condição de Entrada | Resultado Esperado |
+| :---: | :--- | :--- | :--- |
+| **1** | 255 reg + 0 emp | Qtd: 255, Empenhos: 0 | Saldo = 255 |
+| **2** | 255 reg + emp de 27 | Qtd: 255, Empenho: 27 | Saldo = 228 |
+| **3** | 255 reg + emp 27, 15, 20 | Qtd: 255, Empenhos: 27, 15, 20 | Total = 62, Saldo = 193 |
+| **4** | Empenho sem contrato | Empenho isolado | Válido e entra no cálculo |
+| **5** | Contrato com 1 empenho | Contrato + 1 empenho | Válido (`valid: true`) |
+| **6** | Contrato com vários empenhos | Contrato + 3 empenhos | Válido (`valid: true`) |
+| **7** | Contrato sem empenho | Contrato + 0 empenhos | Inválido / Rejeitado (`valid: false`) |
+| **8** | Inclusão de contrato | Adicionar contrato pós-empenho | Saldo permanece inalterado |
+| **9** | Vínculo contrato $\to$ empenho | Vincular contrato ao empenho | Total empenhado não duplica |
+| **10** | Múltiplos vínculos | Mesma NE em 2 contratos | Consumo conta 1 única vez |
+| **11** | Empenho manual no saldo | NE API (42) + NE Manual (20) | Total = 62, Saldo = 193 |
+| **12** | Origem MANUAL identificada | Cadastro manual | Preserva `origem: 'MANUAL'` |
+| **13** | Promoção automática | Manual NE 700 + API NE 700 | 1 registro `SINCRONIZADO` |
+| **14** | Divergência de quantidade | Manual (30 un) != API (25 un) | Status `DIVERGENTE` |
+| **15** | Empenho > Qtd registrada | Registrado 100, Empenhado 120 | Saldo = -20 (Excesso sinalizado) |
+| **16** | Saldo zero | Registrado 255, Empenhado 255 | Saldo = 0, CONSISTENTE |
+| **17** | Alteração de quantidade | Editar NE de 50 para 75 | Recalcula saldo imediatamente |
+| **18** | Exclusão de empenho | Remover NE de 15 | Saldo é restaurado |
+| **19** | Saldo API == Saldo Calculado | Saldo Calc 193 == Saldo API 193 | `✓ SALDOS CONSISTENTES` |
+| **20** | Saldo API != Saldo Calculado | Saldo Calc 193 != Saldo API 200 | `⚠️ Divergência de 7 un` |
 
 ---
 
-# 7. REGRA: TESTE DEVE SER CAPAZ DE FALHAR
+# 4. REGRA DE OURO: CAPACIDADE DE FALHAR
 
-Todo teste crítico deve ser capaz de detectar uma implementação incorreta.
+**"Nunca confie em um teste que você não viu falhar."**
 
-Para cada regra importante, procurar ter:
-
-* cenário válido;
-* cenário inválido;
-* cenário limite;
-* cenário de regressão, quando aplicável.
-
-Sempre que possível:
-
-1. criar o teste;
-2. executar contra a implementação incorreta ou atual;
-3. confirmar que falha pelo motivo esperado;
-4. implementar a correção;
-5. executar novamente;
-6. confirmar PASS.
-
-Nunca alterar um teste simplesmente para fazê-lo passar.
-
-Se o requisito de negócio mudou, alterar primeiro o `/goal` ou a especificação correspondente.
+Cada teste deve comprovar que:
+- Se a função subtraísse contratos do saldo $\to$ o teste 8 e 9 **falhariam**.
+- Se um empenho em 2 contratos somasse duas vezes $\to$ o teste 10 **falharia**.
+- Se um contrato sem empenho fosse aceito $\to$ o teste 7 **falharia**.
+- Se uma divergência de saldo fosse ignorada $\to$ o teste 20 **falharia**.
 
 ---
 
-# 8. VALIDAÇÃO ESPECÍFICA DO SALDO
-
-Quando o `/goal` envolver saldo de ARP, aplicar obrigatoriamente:
-
-## Regra fundamental
-
-Saldo = Quantidade Registrada - Soma das Quantidades Empenhadas
-
-O Contrato NÃO reduz diretamente o saldo.
-
-A Alocação NÃO reduz diretamente o saldo da ARP.
-
-O Empenho é o evento que consome quantidade.
-
-## Invariantes
-
-Quantidade Registrada = Total Empenhado + Saldo
-
-Total Empenhado = Soma dos Empenhos considerados válidos
-
-Empenho sem Contrato = válido
-
-Contrato sem Empenho = inválido
-
-Contrato não pode provocar dupla contagem de Empenho
-
-Saldo negativo não deve ser silenciosamente convertido em zero.
-
----
-
-# 9. VALIDAÇÃO DE EMPENHOS
-
-Verificar:
-
-* empenho retornado pela API;
-* empenho inserido manualmente;
-* identificação da origem;
-* prevenção de duplicidade;
-* alteração;
-* exclusão/cancelamento;
-* impacto no saldo;
-* correspondência posterior entre registro manual e API.
-
-Um Empenho manual deve ser identificado como MANUAL.
-
-Um Empenho posteriormente confirmado pela API não deve gerar duplicidade.
-
----
-
-# 10. VALIDAÇÃO DE CONTRATOS
-
-Verificar:
-
-* contrato retornado pela API;
-* contrato manual;
-* contrato com um empenho;
-* contrato com vários empenhos;
-* contrato sem empenho;
-* vínculos;
-* duplicidade;
-* impacto no saldo.
-
-Regra obrigatória:
-
-Contrato sem Empenho = inválido.
-
-Regra obrigatória:
-
-Adicionar ou remover vínculo de Contrato não pode alterar diretamente o saldo da ARP.
-
----
-
-# 11. VALIDAÇÃO API × DADOS MANUAIS
-
-Quando houver duas fontes:
-
-API
-MANUAL
-
-não sobrescrever silenciosamente informações divergentes.
-
-Classificar:
-
-* CONFIRMADO;
-* MANUAL;
-* CORRESPONDENTE;
-* DIVERGENTE;
-* NÃO LOCALIZADO.
-
-Quando um registro manual posteriormente aparecer na API:
-
-* detectar correspondência;
-* evitar duplicidade;
-* preservar histórico/origem;
-* sinalizar eventual divergência.
-
----
-
-# 12. DADOS ARTIFICIAIS
-
-Não utilizar dados de negócio fictícios para fazer a aplicação funcionar.
-
-Não criar fallback que produza:
-
-* empenho fictício;
-* contrato fictício;
-* fornecedor fictício;
-* CNPJ hardcoded;
-* quantidade artificial;
-* valor artificial;
-* número PNCP artificial.
-
-Quando uma API não encontrar informação:
-
-API não encontrou
-→ informar ausência
-→ permitir entrada manual quando previsto pelo /goal
-
-Não:
-
-API não encontrou
-→ inventar registro.
-
----
-
-# 13. RECONCILIAÇÃO
-
-Quando existir saldo informado por uma fonte externa, comparar com o saldo calculado.
-
-Exemplo:
-
-Quantidade registrada = 255
-
-Empenhos:
-27 + 15 + 20 = 62
-
-Saldo calculado = 193
-
-Saldo API = 193
-
-Resultado:
-
-CONSISTENTE
-
-Se:
-
-Saldo calculado = 193
-Saldo API = 200
-
-Resultado:
-
-DIVERGÊNCIA = 7
-
-Nunca mascarar divergências.
-
----
-
-# 14. LOOP DE CORREÇÃO
-
-Quando um teste ou validação falhar:
-
-1. identificar exatamente qual critério falhou;
-2. localizar a causa;
-3. corrigir a causa;
-4. evitar corrigir apenas o sintoma;
-5. executar novamente o teste que falhou;
-6. executar testes relacionados;
-7. executar a suíte de regressão;
-8. voltar ao início do ciclo.
-
-Priorizar:
-
-REGRA DE NEGÓCIO
-→ INTEGRIDADE DOS DADOS
-→ TESTES
-→ IMPLEMENTAÇÃO
-→ UI
-
-Não corrigir UI para esconder erro de regra de negócio.
-
----
-
-# 15. PREVENÇÃO DE REGRESSÃO
-
-Após cada alteração relevante:
-
-* executar teste específico;
-* executar testes relacionados;
-* executar suíte de regressão.
-
-Uma funcionalidade previamente aprovada não pode ser quebrada para fazer outro critério passar.
-
-Se isso ocorrer:
-
-1. identificar conflito;
-2. corrigir a implementação;
-3. preservar ambos os comportamentos quando possível;
-4. criar teste de regressão permanente.
-
----
-
-# 16. LIMITE DO LOOP
-
-Não entrar em loop infinito.
-
-Se a mesma falha persistir após várias tentativas de correção:
-
-1. parar a alteração;
-2. diagnosticar a causa;
-3. registrar a falha;
-4. informar qual requisito está bloqueado;
-5. informar quais hipóteses foram testadas;
-6. não declarar DONE.
-
-Nunca remover ou enfraquecer um requisito para escapar de uma falha.
-
-Nunca apagar um teste porque ele impede a conclusão.
-
----
-
-# 17. CRITÉRIO DE DONE
-
-Declarar DONE somente quando:
-
-[ ] /goal interpretado
-
-[ ] Todos os critérios funcionais satisfeitos
-
-[ ] Regras de negócio satisfeitas
-
-[ ] Build passando
-
-[ ] Typecheck passando, quando disponível
-
-[ ] Lint passando, quando disponível
-
-[ ] Testes unitários passando
-
-[ ] Testes de integração passando, quando aplicável
-
-[ ] Testes de regressão passando
-
-[ ] Testes críticos demonstradamente capazes de detectar falhas
-
-[ ] Nenhum dado artificial introduzido
-
-[ ] Nenhum mock/fallback de negócio utilizado para mascarar ausência de dados
-
-[ ] Integridade dos dados preservada
-
-[ ] Alterações documentadas
-
-[ ] Nenhuma falha conhecida relacionada ao /goal
-
-Somente então declarar:
-
-DONE
-
----
-
-# 18. RELATÓRIO FINAL
-
-Ao concluir o loop, produzir relatório objetivo contendo:
-
-## Implementado
-
-Lista das alterações realizadas.
-
-## Arquivos alterados
-
-Lista dos arquivos.
-
-## Regras validadas
-
-Lista das regras de negócio testadas.
-
-## Testes
-
-Para cada teste:
-
-* nome;
-* resultado;
-* PASS/FAIL.
-
-## Build
-
-Resultado.
-
-## Typecheck
-
-Resultado.
-
-## Lint
-
-Resultado.
-
-## Regressão
-
-Resultado.
-
-## Evidências
-
-Informar os comandos executados e os resultados relevantes.
-
-## Pendências
-
-Se houver qualquer requisito não atendido, não declarar DONE.
-
-Informar:
-
-* requisito;
-* motivo;
-* impacto;
-* próximo passo recomendado.
-
----
-
-# 19. PRINCÍPIO FINAL
-
-A Skill deve otimizar para:
-
-CORREÇÃO
-+
-EVIDÊNCIA
-+
-REPETIBILIDADE
-
-e não para:
-
-VELOCIDADE
-ou
-QUANTIDADE DE CÓDIGO PRODUZIDO.
-
-O objetivo do loop não é "alterar o projeto".
-
-O objetivo é produzir um estado do projeto no qual seja possível demonstrar que o /goal foi satisfeito.
+# 5. PROTOCOLO DE CONCLUSÃO (DONE)
+
+O ciclo só pode ser encerrado quando:
+- `npm run build` passar com 0 erros de tipagem/bundling.
+- `npx vitest run` aprovar 100% dos testes unitários e de regressão.
+- O subagente **Verificador** emitir o relatório `APPROVED` com **Confiança ALTA**.
