@@ -142,12 +142,20 @@ export interface PncpAtaVigenciaInfo {
   dataAtualizacao?: string;
 }
 
+const pncpVigenciaCache = new Map<string, PncpAtaVigenciaInfo>();
+let supplementalPncpArpsCache: ArpRecord[] | null = null;
+const pncpCompraItemsCache = new Map<string, ArpItemRecord[]>();
+
 /**
- * Consulta a vigência oficial atualizada da Ata diretamente no PNCP
+ * Consulta a vigência oficial atualizada da Ata diretamente no PNCP com cache em memória
  * Endpoint: GET /api-pncp/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{seqCompra}/atas/{seqAta}
  */
 export async function fetchPncpAtaVigencia(numeroControlePncpAta?: string): Promise<PncpAtaVigenciaInfo | null> {
   if (!numeroControlePncpAta) return null;
+  if (pncpVigenciaCache.has(numeroControlePncpAta)) {
+    return pncpVigenciaCache.get(numeroControlePncpAta)!;
+  }
+
   const match = numeroControlePncpAta.match(/^(\d{14})-1-(\d{6})\/(\d{4})-(\d{6})$/);
   if (!match) return null;
 
@@ -161,12 +169,14 @@ export async function fetchPncpAtaVigencia(numeroControlePncpAta?: string): Prom
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
-      return {
+      const info: PncpAtaVigenciaInfo = {
         dataVigenciaFim: data.dataVigenciaFim,
         cancelado: data.cancelado,
         dataCancelamento: data.dataCancelamento,
-        dataAtualizacao: data.dataAtualizacao
+        dataAtualizacao: data.dataAtualizacao || data.dataAtualizacaoGlobal
       };
+      pncpVigenciaCache.set(numeroControlePncpAta, info);
+      return info;
     }
   } catch (e) {
     console.warn(`Falha na consulta de vigência PNCP para a ata ${numeroControlePncpAta}:`, e);
@@ -196,7 +206,7 @@ export function enrichArpWithPncpVigencia(arp: ArpRecord, pncpInfo?: PncpAtaVige
 }
 
 /**
- * Enriquece em lote uma lista de Atas com as vigências oficiais do PNCP
+ * Enriquece em lote uma lista de Atas com as vigências oficiais do PNCP de forma otimizada
  */
 export async function enrichArpsBatchWithPncpVigencia(
   arpsList: ArpRecord[],
@@ -205,26 +215,43 @@ export async function enrichArpsBatchWithPncpVigencia(
   if (!arpsList || arpsList.length === 0) return [];
   const results = [...arpsList];
 
-  const batchSize = 6;
-  for (let i = 0; i < results.length; i += batchSize) {
-    const batch = results.slice(i, i + batchSize);
+  // Priorizar atas que precisam de checagem (evita requisições redundantes)
+  const toCheckIndices = results
+    .map((arp, idx) => ({ arp, idx }))
+    .filter(({ arp }) => !!arp.numeroControlePncpAta && !arp.prorrogadaPncp);
+
+  if (toCheckIndices.length === 0) return results;
+
+  let hasAnyChanges = false;
+  const batchSize = 10;
+  for (let i = 0; i < toCheckIndices.length; i += batchSize) {
+    const chunk = toCheckIndices.slice(i, i + batchSize);
+    let chunkChanged = false;
+
     await Promise.all(
-      batch.map(async (arp, bIdx) => {
-        const globalIdx = i + bIdx;
+      chunk.map(async ({ arp, idx }) => {
         if (arp.numeroControlePncpAta) {
           const info = await fetchPncpAtaVigencia(arp.numeroControlePncpAta);
           if (info) {
-            results[globalIdx] = enrichArpWithPncpVigencia(arp, info);
+            const enriched = enrichArpWithPncpVigencia(arp, info);
+            if (enriched.dataVigenciaFinal !== arp.dataVigenciaFinal || enriched.isCanceladaPncp !== arp.isCanceladaPncp) {
+              results[idx] = enriched;
+              chunkChanged = true;
+              hasAnyChanges = true;
+            }
           }
         }
       })
     );
-    if (onUpdateProgress) {
+
+    if (chunkChanged && onUpdateProgress) {
       onUpdateProgress([...results]);
     }
   }
 
-  cacheArpsInDb(results);
+  if (hasAnyChanges) {
+    cacheArpsInDb(results);
+  }
   return results;
 }
 
@@ -238,6 +265,10 @@ export const SUPPLEMENTAL_PNCP_ATAS = [
 
 export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<ArpRecord[]> {
   if (targetUasg && targetUasg !== '200331') return [];
+  if (supplementalPncpArpsCache && supplementalPncpArpsCache.length > 0) {
+    return supplementalPncpArpsCache;
+  }
+
   const cnpj = '00394494000136';
   const supplemental: ArpRecord[] = [];
 
@@ -280,7 +311,8 @@ export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<Ar
             idCompra: `20033105${String(item.seqCompra)}${item.anoCompra}`,
             dataVigenciaFinalPncp: d.dataVigenciaFim,
             isCanceladaPncp: !!d.cancelado,
-            prorrogadaPncp: false
+            prorrogadaPncp: false,
+            dataAtualizacaoPncp: d.dataAtualizacao || d.dataAtualizacaoGlobal
           };
           supplemental.push(arpRec);
         }
@@ -290,6 +322,7 @@ export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<Ar
     })
   );
 
+  supplementalPncpArpsCache = supplemental;
   return supplemental;
 }
 
@@ -299,6 +332,11 @@ export async function fetchPncpCompraItems(
   numeroAta: string,
   uasg: string
 ): Promise<ArpItemRecord[]> {
+  const cacheKey = `${anoCompra}-${seqCompra}-${numeroAta}-${uasg}`;
+  if (pncpCompraItemsCache.has(cacheKey)) {
+    return pncpCompraItemsCache.get(cacheKey)!;
+  }
+
   const cnpj = '00394494000136';
   try {
     const itemsUrl = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${anoCompra}/${seqCompra}/itens`;
@@ -370,6 +408,7 @@ export async function fetchPncpCompraItems(
         } as ArpItemRecord;
       })
     );
+    pncpCompraItemsCache.set(cacheKey, arpItems);
     return arpItems;
   } catch (e) {
     console.warn(`Erro ao carregar itens da compra ${seqCompra}/${anoCompra} no PNCP:`, e);

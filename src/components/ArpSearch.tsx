@@ -50,7 +50,8 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   const loadItemsForArps = async (arpsList: ArpRecord[]) => {
     if (!arpsList || arpsList.length === 0) return;
 
-    const toFetch = arpsList.filter(arp => {
+    // Apenas carregar itens sob demanda para as primeiras atas visíveis que ainda não possuam itens
+    const toFetch = arpsList.slice(0, 15).filter(arp => {
       const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
       return itemsByAta[key] === undefined && !itemsLoadingByAta[key];
     });
@@ -65,33 +66,37 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
       return next;
     });
 
-    await Promise.allSettled(
-      toFetch.map(async (arp) => {
-        const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
-        try {
-          const res = await fetchArpItems(
-            arp.dataVigenciaInicial,
-            arp.codigoUnidadeGerenciadora,
-            arp.numeroAtaRegistroPreco
-          );
-          setItemsByAta(prev => ({
-            ...prev,
-            [key]: res.resultado || []
-          }));
-        } catch (err) {
-          console.warn(`Erro ao carregar itens da Ata ${key}`, err);
-          setItemsByAta(prev => ({
-            ...prev,
-            [key]: []
-          }));
-        } finally {
-          setItemsLoadingByAta(prev => ({
-            ...prev,
-            [key]: false
-          }));
-        }
-      })
-    );
+    // Concorrência controlada (máximo 3 requisições simultâneas)
+    const batchSize = 3;
+    for (let i = 0; i < toFetch.length; i += batchSize) {
+      const chunk = toFetch.slice(i, i + batchSize);
+      await Promise.allSettled(
+        chunk.map(async (arp) => {
+          const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
+          try {
+            const res = await fetchArpItems(
+              arp.dataVigenciaInicial,
+              arp.codigoUnidadeGerenciadora,
+              arp.numeroAtaRegistroPreco
+            );
+            setItemsByAta(prev => ({
+              ...prev,
+              [key]: res.resultado || []
+            }));
+          } catch (err) {
+            setItemsByAta(prev => ({
+              ...prev,
+              [key]: []
+            }));
+          } finally {
+            setItemsLoadingByAta(prev => ({
+              ...prev,
+              [key]: false
+            }));
+          }
+        })
+      );
+    }
   };
 
   const handleSearch = async (e?: React.FormEvent) => {
@@ -105,24 +110,32 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
     setLoading(true);
     setError(null);
     try {
-      const [data, batchItems] = await Promise.all([
-        fetchArps(params),
-        fetchArpItemsBatch(params)
-      ]);
+      // 1. Carrega a lista de Atas rapidamente e renderiza a tela de imediato
+      const data = await fetchArps(params);
       const results = data.resultado || [];
       setArps(results);
-      setItemsByAta(batchItems);
+      setLoading(false);
+
       if (results.length === 0) {
         setError('Nenhuma Ata encontrada para os filtros especificados.');
-      } else {
-        // Enriquecer em segundo plano a vigência oficial das Atas com o PNCP
-        enrichArpsBatchWithPncpVigencia(results, (updated) => setArps(updated)).catch((e) => {
-          console.warn('Erro na sincronização de vigência PNCP em segundo plano:', e);
-        });
+        return;
       }
+
+      // 2. Carrega itens em lote e sincroniza PNCP em segundo plano sem travar a interface
+      fetchArpItemsBatch(params).then(batchItems => {
+        if (batchItems && Object.keys(batchItems).length > 0) {
+          setItemsByAta(prev => ({ ...prev, ...batchItems }));
+        }
+      }).catch(err => {
+        console.warn('Erro ao carregar itens em lote em segundo plano:', err);
+      });
+
+      enrichArpsBatchWithPncpVigencia(results, (updated) => setArps(updated)).catch((e) => {
+        console.warn('Erro na sincronização de vigência PNCP em segundo plano:', e);
+      });
+
     } catch (err: any) {
       setError(err.message || 'Falha ao buscar as Atas de Registro de Preço na API.');
-    } finally {
       setLoading(false);
     }
   };
