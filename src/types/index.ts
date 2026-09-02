@@ -31,6 +31,10 @@ export interface ArpRecord {
   numeroControlePncpAta: string;
   numeroControlePncpCompra: string;
   idCompra: string;
+  dataVigenciaFinalPncp?: string;
+  isCanceladaPncp?: boolean;
+  prorrogadaPncp?: boolean;
+  dataAtualizacaoPncp?: string;
 }
 
 export interface ArpItemsResponse {
@@ -72,6 +76,7 @@ export interface ArpItemRecord {
   numeroControlePncpAta: string;
   codigoPdm: number;
   nomePdm: string;
+  quantidadeEstimadaEdital?: number;
 }
 
 export interface UnidadesItemResponse {

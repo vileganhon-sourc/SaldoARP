@@ -194,6 +194,45 @@ export function calculateSaldoAlocado(
 }
 
 /**
+ * 7.1. Calcula o consumo e saldo de múltiplas Alocações Internas a partir da
+ * lista canônica e unificada de Empenhos (allEmpenhos).
+ * 
+ * Regra Obrigatória (Isolamento e Anti-Duplicação):
+ * - Cada empenho único é contabilizado EXATAMENTE UMA VEZ por alocação vinculada.
+ * - Não soma separadamente empenhos de contratos e empenhos de saldo da ata,
+ *   pois o mesmo empenho pode estar presente em ambas as visualizações.
+ * - SaldoAlocacao = CotaAlocada - ∑ EmpenhosVinculadosAoDepartamento
+ */
+export function calculateAllocationsWithEmpenhos<T extends { id: string; allocatedQty: number; empenhadaQty?: number }>(
+  allocations: T[],
+  allEmpenhos: Empenho[],
+  linksMap?: Record<string, string>
+): (T & { empenhadaQty: number; saldoQty: number })[] {
+  return allocations.map(alloc => {
+    // Filtra apenas os empenhos que pertencem a esta alocação na lista consolidada e deduplicada
+    const linkedEmpenhos = (allEmpenhos || []).filter(emp => {
+      if (emp.unidadeInternaId === alloc.id) return true;
+      if (linksMap) {
+        if (linksMap[emp.numero] === alloc.id) return true;
+        const normNum = normalizeEmpenhoNumero(emp.numero);
+        if (normNum && linksMap[normNum] === alloc.id) return true;
+        if (emp.id && linksMap[emp.id] === alloc.id) return true;
+      }
+      return false;
+    });
+
+    const empenhadaQty = calculateTotalEmpenhado(linkedEmpenhos);
+    const saldoQty = (Number(alloc.allocatedQty) || 0) - empenhadaQty;
+
+    return {
+      ...alloc,
+      empenhadaQty,
+      saldoQty
+    };
+  });
+}
+
+/**
  * 8. Relatório de Reconciliação Contábil e Auditoria do Item:
  * Compara Fonte 1 (API SIASG) com Fonte 2 (Soma dos Empenhos Conhecidos).
  * NÃO altera nem sobrescreve nenhuma das fontes automaticamente.
@@ -319,3 +358,66 @@ export function matchAndMergeEmpenhos(
 
   return Array.from(mergedMap.values());
 }
+
+/**
+ * 10. Calcula as estatísticas e percentuais consolidados para os cards de resumo do item:
+ * - Saldo e Consumo p/ Empenho / Remanejamento (suportando percentuais reais de excesso)
+ * - Saldo e Consumo para Adesões / Caronas (respeitando o teto do item e evitando duplicação por número de unidades)
+ */
+export function calculateItemCardMetrics(params: {
+  quantidadeHomologada: number;
+  totalEmpenhado: number;
+  maximoAdesaoItem?: number;
+  totalAdesaoConsumida?: number;
+  valorUnitario?: number;
+  gerenciadoraLimiteAdesao?: number;
+}) {
+  const {
+    quantidadeHomologada,
+    totalEmpenhado,
+    maximoAdesaoItem = 0,
+    totalAdesaoConsumida = 0,
+    valorUnitario = 0,
+    gerenciadoraLimiteAdesao = 0
+  } = params;
+
+  const itemTotalQty = Number(quantidadeHomologada) || 0;
+  const officialSaldo = itemTotalQty - totalEmpenhado;
+  const empenhoConsumidoPercent = itemTotalQty > 0 ? (totalEmpenhado / itemTotalQty) * 100 : 0;
+  const rawEmpenhoPercentRestante = itemTotalQty > 0 ? (officialSaldo / itemTotalQty) * 100 : 0;
+  const empenhoPercentClamped = Math.min(100, Math.max(0, rawEmpenhoPercentRestante));
+
+  // Limite global de adesão (carona) por item (jamais multiplicado pelo total de unidades participantes)
+  const limiteAdesao = maximoAdesaoItem > 0
+    ? maximoAdesaoItem
+    : (gerenciadoraLimiteAdesao > 0
+        ? gerenciadoraLimiteAdesao
+        : (itemTotalQty > 0 ? itemTotalQty * 2 : 0));
+
+  const totalConsumidoAdesao = Number(totalAdesaoConsumida) || 0;
+  const saldoAdesoes = Math.max(0, limiteAdesao - totalConsumidoAdesao);
+  const adsPercVal = limiteAdesao > 0 ? (saldoAdesoes / limiteAdesao) * 100 : 0;
+  const adsConsPercVal = limiteAdesao > 0 ? (totalConsumidoAdesao / limiteAdesao) * 100 : 0;
+  const adsPercValClamped = Math.min(100, Math.max(0, adsPercVal));
+
+  const valorFinanceiroDisponivel = officialSaldo * (Number(valorUnitario) || 0);
+  const valorFinanceiroConsumido = totalEmpenhado * (Number(valorUnitario) || 0);
+
+  return {
+    officialSaldo,
+    totalEmpenhado,
+    itemTotalQty,
+    empenhoConsumidoPercent,
+    rawEmpenhoPercentRestante,
+    empenhoPercentClamped,
+    limiteAdesao,
+    totalConsumidoAdesao,
+    saldoAdesoes,
+    adsPercVal,
+    adsConsPercVal,
+    adsPercValClamped,
+    valorFinanceiroDisponivel,
+    valorFinanceiroConsumido
+  };
+}
+

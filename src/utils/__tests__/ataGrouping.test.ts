@@ -180,5 +180,8 @@ describe('Agrupamento de Atas e Utilitários', () => {
     expect(getCanonicalContractKey('00214', '2026')).toBe('214/2026');
     expect(getCanonicalContractKey(undefined, undefined, '00394494000136-2-000214/2026')).toBe('214/2026');
     expect(getCanonicalContractKey('2026NE000123')).toBe('2026NE123');
+    // Caso real: Contrato 00192/2026 com numeroControlePncp 00394494000136-2-000001/2026 normaliza para 192/2026
+    expect(getCanonicalContractKey('00192/2026', '2026', '00394494000136-2-000001/2026')).toBe('192/2026');
+    expect(getCanonicalContractKey('00192/2026')).toBe('192/2026');
   });
 });

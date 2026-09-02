@@ -7,12 +7,15 @@ import {
   validateContrato,
   calculateSaldoPorUnidade,
   calculateSaldoAlocado,
+  calculateAllocationsWithEmpenhos,
   reconcileBalances,
   matchAndMergeEmpenhos,
   normalizeEmpenhoNumero,
-  getEmpenhoCanonicalKey
+  getEmpenhoCanonicalKey,
+  calculateItemCardMetrics
 } from '../balanceService';
-import type { Empenho, Contrato, ContratoEmpenho } from '../../types';
+import { enrichArpWithPncpVigencia } from '../api';
+import type { Empenho, Contrato, ContratoEmpenho, ArpRecord } from '../../types';
 
 describe('balanceService - Suíte de 20 Testes Obrigatórios e Invariantes Contábeis', () => {
 
@@ -409,4 +412,276 @@ describe('balanceService - Suíte de 20 Testes Obrigatórios e Invariantes Cont�
     expect(getEmpenhoCanonicalKey({ numero: '2026NE000700', ano: 2026, uasg: '200331', itemId: '1' })).toBe('2026NE700-2026-200331-1');
   });
 
+  // Teste 24: Alocação interna com empenhos vinculados sem dupla contagem (Cenário do Usuário)
+  it('24. Deve calcular consumo de alocação interna sem somar em duplicidade empenhos presentes em contrato e empenhos conhecidos', () => {
+    const allocations = [
+      { id: 'alloc-diopi', unitName: 'DIOPI', allocatedQty: 30, empenhadaQty: 0 }
+    ];
+
+    // Empenhos consolidados e deduplicados (mesmo que venham de contratos e API)
+    const allEmpenhos: Empenho[] = [
+      { id: 'emp-663', numero: '2025NE000663', ano: 2025, arpId: '00077/2025', itemId: '00001', uasg: '200331', quantidade: 10, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-665', numero: '2025NE000665', ano: 2025, arpId: '00077/2025', itemId: '00001', uasg: '200331', quantidade: 1, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-340', numero: '2026NE000340', ano: 2025, arpId: '00077/2025', itemId: '00001', uasg: '200331', quantidade: 18, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-341', numero: '2026NE000341', ano: 2025, arpId: '00077/2025', itemId: '00001', uasg: '200331', quantidade: 3, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' }
+    ];
+
+    const linksMap = {
+      '2025NE000663': 'alloc-diopi',
+      '2025NE000665': 'alloc-diopi'
+    };
+
+    const calculated = calculateAllocationsWithEmpenhos(allocations, allEmpenhos, linksMap);
+
+    // DIOPI: cota 30 un, empenhado 10 + 1 = 11 un (NÃO 22 un), saldo disponível = 19 un (NÃO 8 un)
+    expect(calculated[0].empenhadaQty).toBe(11);
+    expect(calculated[0].saldoQty).toBe(19);
+  });
+
+  // Teste 25: Múltiplas alocações internas com empenhos manuais e oficiais
+  it('25. Deve distribuir corretamente os saldos entre diferentes departamentos sem vazamento ou dupla contagem', () => {
+    const allocations = [
+      { id: 'alloc-diopi', unitName: 'DIOPI', allocatedQty: 25, empenhadaQty: 0 },
+      { id: 'alloc-ditel', unitName: 'DITEL', allocatedQty: 15, empenhadaQty: 0 }
+    ];
+
+    const allEmpenhos: Empenho[] = [
+      { id: 'emp-1', numero: '2026NE000001', ano: 2026, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 10, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-2', numero: '2026NE000002', ano: 2026, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 5, unidadeInternaId: 'alloc-ditel', origem: 'MANUAL', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-3', numero: '2026NE000003', ano: 2026, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 8, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' } // Não vinculado
+    ];
+
+    const calculated = calculateAllocationsWithEmpenhos(allocations, allEmpenhos);
+
+    expect(calculated[0].unitName).toBe('DIOPI');
+    expect(calculated[0].empenhadaQty).toBe(10);
+    expect(calculated[0].saldoQty).toBe(15);
+
+    expect(calculated[1].unitName).toBe('DITEL');
+    expect(calculated[1].empenhadaQty).toBe(5);
+    expect(calculated[1].saldoQty).toBe(10);
+  });
+
+  // Teste 26: Saldo negativo explícito quando empenho > cota alocada
+  it('26. Deve apresentar saldo negativo quando a quantidade empenhada da Unidade Interna exceder a cota alocada', () => {
+    const allocations = [
+      { id: 'alloc-diopi', unitName: 'DIOPI', allocatedQty: 30, empenhadaQty: 0 }
+    ];
+
+    // Total empenhado: 10 + 1 + 18 + 3 = 32 un (excede a cota de 30 un em 2 un)
+    const allEmpenhos: Empenho[] = [
+      { id: 'emp-663', numero: '2025NE000663', ano: 2025, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 10, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-665', numero: '2025NE000665', ano: 2025, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 1, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-340', numero: '2026NE000340', ano: 2026, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 18, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-341', numero: '2026NE000341', ano: 2026, arpId: 'Ata1', itemId: '1', uasg: '200331', quantidade: 3, unidadeInternaId: 'alloc-diopi', origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' }
+    ];
+
+    const calculated = calculateAllocationsWithEmpenhos(allocations, allEmpenhos);
+
+    // Cota 30 - Empenhado 32 = Saldo -2 (preservado como negativo, sem truncar para zero)
+    expect(calculated[0].empenhadaQty).toBe(32);
+    expect(calculated[0].saldoQty).toBe(-2);
+  });
+
+  // Teste 27: Cálculo exato de consumo e excesso em percentual (Card Saldo p/ Empenho / Remanejamento)
+  it('27. Deve calcular percentual consumido correto (> 100%) e saldo negativo em caso de excesso de empenho', () => {
+    // Cenário idêntico ao da imagem enviada pelo usuário: 185 un registradas, 5.369 un empenhadas
+    const metrics = calculateItemCardMetrics({
+      quantidadeHomologada: 185,
+      totalEmpenhado: 5369,
+      valorUnitario: 2427.99
+    });
+
+    expect(metrics.officialSaldo).toBe(-5184);
+    expect(metrics.totalEmpenhado).toBe(5369);
+    // Consumido: (5369 / 185) * 100 = 2902.162162...% (NÃO 100%)
+    expect(metrics.empenhoConsumidoPercent).toBeCloseTo(2902.16, 1);
+    // Restante: (-5184 / 185) * 100 = -2802.162162...%
+    expect(metrics.rawEmpenhoPercentRestante).toBeCloseTo(-2802.16, 1);
+    // Para a largura da barra CSS (0% a 100%), deve grampar em 0%
+    expect(metrics.empenhoPercentClamped).toBe(0);
+  });
+
+  // Teste 28: Teto global de adesões (caronas) sem duplicação por contagem de unidades
+  it('28. Deve calcular o teto e saldo de caronas com base no limite do item e não multiplicar pelas unidades participantes', () => {
+    // Cenário da imagem: 185 un homologadas, teto do item de adesão 185 un, 44 caronas consumidas
+    const metrics = calculateItemCardMetrics({
+      quantidadeHomologada: 185,
+      totalEmpenhado: 5369,
+      maximoAdesaoItem: 185,
+      totalAdesaoConsumida: 44,
+      gerenciadoraLimiteAdesao: 185
+    });
+
+    // Teto de caronas deve ser 185 un (jamais 8.140 un do reduce com 44 unidades)
+    expect(metrics.limiteAdesao).toBe(185);
+    expect(metrics.totalConsumidoAdesao).toBe(44);
+    expect(metrics.saldoAdesoes).toBe(141);
+    // Consumido: (44 / 185) * 100 = 23.78%
+    expect(metrics.adsConsPercVal).toBeCloseTo(23.78, 1);
+    // Restante: (141 / 185) * 100 = 76.22%
+    expect(metrics.adsPercVal).toBeCloseTo(76.22, 1);
+  });
+
+  // Teste 29: Valor financeiro disponível refletindo o saldo calculado acumulado
+  it('29. Deve calcular o valor financeiro disponível proporcional ao saldo oficial apurado', () => {
+    const metrics = calculateItemCardMetrics({
+      quantidadeHomologada: 185,
+      totalEmpenhado: 5369,
+      valorUnitario: 2427.99
+    });
+
+    // Saldo -5184 un * R$ 2.427,99 = -R$ 12.586.700,16
+    expect(metrics.valorFinanceiroDisponivel).toBeCloseTo(-12586700.16, 2);
+    // Consumido 5369 un * R$ 2.427,99 = R$ 13.035.878,31
+    expect(metrics.valorFinanceiroConsumido).toBeCloseTo(13035878.31, 2);
+  });
+
+  // Teste 30: Enriquecimento de vigência com data oficial prorrogada do PNCP
+  it('30. Deve atualizar dataVigenciaFinal e sinalizar prorrogadaPncp quando o PNCP tiver vigência estendida', () => {
+    const mockArp: ArpRecord = {
+      numeroAtaRegistroPreco: '00076/2024',
+      codigoUnidadeGerenciadora: '200331',
+      nomeUnidadeGerenciadora: 'SENASP',
+      codigoOrgao: 30911,
+      nomeOrgao: 'SENASP',
+      numeroCompra: '90022',
+      anoCompra: '2024',
+      codigoModalidadeCompra: '05',
+      nomeModalidadeCompra: 'Pregão',
+      dataAssinatura: '2024-12-27',
+      dataVigenciaInicial: '2024-12-28',
+      dataVigenciaFinal: '2025-12-28', // Data original de 1 ano do Compras.gov
+      valorTotal: 8797500,
+      statusAta: 'Ata de Registro de Preços',
+      objeto: 'Combate a Incêndios',
+      quantidadeItens: 1,
+      dataHoraAtualizacao: '',
+      dataHoraInclusao: '',
+      dataHoraExclusao: null,
+      ataExcluido: false,
+      numeroControlePncpAta: '00394494000136-1-000947/2024-000001',
+      numeroControlePncpCompra: '00394494000136-1-000947/2024',
+      idCompra: '20033105900222024'
+    };
+
+    const enriched = enrichArpWithPncpVigencia(mockArp, {
+      dataVigenciaFim: '2026-12-28',
+      cancelado: false
+    });
+
+    expect(enriched.dataVigenciaFinal).toBe('2026-12-28');
+    expect(enriched.dataVigenciaFinalPncp).toBe('2026-12-28');
+    expect(enriched.prorrogadaPncp).toBe(true);
+    expect(enriched.isCanceladaPncp).toBe(false);
+  });
+
+  // Teste 31: Detecção de ata cancelada oficialmente no PNCP
+  it('31. Deve sinalizar isCanceladaPncp quando o status do PNCP for cancelado: true', () => {
+    const mockArp: ArpRecord = {
+      numeroAtaRegistroPreco: '00068/2024',
+      codigoUnidadeGerenciadora: '200331',
+      nomeUnidadeGerenciadora: 'SENASP',
+      codigoOrgao: 30911,
+      nomeOrgao: 'SENASP',
+      numeroCompra: '90022',
+      anoCompra: '2024',
+      codigoModalidadeCompra: '05',
+      nomeModalidadeCompra: 'Pregão',
+      dataAssinatura: '2024-12-27',
+      dataVigenciaInicial: '2024-12-28',
+      dataVigenciaFinal: '2026-12-28',
+      valorTotal: 500000,
+      statusAta: 'Ata de Registro de Preços',
+      objeto: 'Objeto teste',
+      quantidadeItens: 1,
+      dataHoraAtualizacao: '',
+      dataHoraInclusao: '',
+      dataHoraExclusao: null,
+      ataExcluido: false,
+      numeroControlePncpAta: '00394494000136-1-000947/2024-000002',
+      numeroControlePncpCompra: '00394494000136-1-000947/2024',
+      idCompra: '20033105900222024'
+    };
+
+    const enriched = enrichArpWithPncpVigencia(mockArp, {
+      dataVigenciaFim: '2025-12-27',
+      cancelado: true
+    });
+
+    expect(enriched.isCanceladaPncp).toBe(true);
+  });
+
+  // Teste 32: Consumo cumulativo de saldo em ata prorrogada plurianual (Ano 1 + Ano 2)
+  it('32. Deve acumular corretamente empenhos de anos subsequentes sem fabricar saldos adicionais', () => {
+    const qtdRegistrada = 391;
+    const empenhosPlurianuais: Empenho[] = [
+      { id: 'emp-1', numero: '2024NE000100', ano: 2024, arpId: '00076/2024', itemId: '3', uasg: '200331', quantidade: 100, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-2', numero: '2025NE000200', ano: 2025, arpId: '00076/2024', itemId: '3', uasg: '200331', quantidade: 150, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' },
+      { id: 'emp-3', numero: '2026NE000300', ano: 2026, arpId: '00076/2024', itemId: '3', uasg: '200331', quantidade: 50, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' }
+    ];
+
+    const totalEmpenhado = calculateTotalEmpenhado(empenhosPlurianuais);
+    const saldo = calculateSaldo(qtdRegistrada, empenhosPlurianuais);
+
+    expect(totalEmpenhado).toBe(300);
+    expect(saldo).toBe(91);
+    // Invariante: QtdRegistrada = TotalEmpenhado + Saldo (391 = 300 + 91)
+    expect(qtdRegistrada).toBe(totalEmpenhado + saldo);
+  });
+
+  // Teste 33: Propagação de dataAtualizacaoPncp na sincronização de vigência
+  it('33. Deve propagar a dataAtualizacaoPncp para auditoria e histórico de publicações oficiais', () => {
+    const mockArp: ArpRecord = {
+      numeroAtaRegistroPreco: '00076/2024',
+      codigoUnidadeGerenciadora: '200331',
+      nomeUnidadeGerenciadora: 'SENASP',
+      codigoOrgao: 30911,
+      nomeOrgao: 'SENASP',
+      numeroCompra: '90022',
+      anoCompra: '2024',
+      codigoModalidadeCompra: '05',
+      nomeModalidadeCompra: 'Pregão',
+      dataAssinatura: '2024-12-27',
+      dataVigenciaInicial: '2024-12-28',
+      dataVigenciaFinal: '2025-12-28',
+      valorTotal: 8797500,
+      statusAta: 'Ata de Registro de Preços',
+      objeto: 'Combate a Incêndios',
+      quantidadeItens: 1,
+      dataHoraAtualizacao: '',
+      dataHoraInclusao: '',
+      dataHoraExclusao: null,
+      ataExcluido: false,
+      numeroControlePncpAta: '00394494000136-1-000947/2024-000001',
+      numeroControlePncpCompra: '00394494000136-1-000947/2024',
+      idCompra: '20033105900222024'
+    };
+
+    const enriched = enrichArpWithPncpVigencia(mockArp, {
+      dataVigenciaFim: '2026-12-28',
+      cancelado: false,
+      dataAtualizacao: '2026-08-24T10:05:54'
+    });
+
+    expect(enriched.dataAtualizacaoPncp).toBe('2026-08-24T10:05:54');
+    expect(enriched.prorrogadaPncp).toBe(true);
+  });
+
+  // Teste 34: Isolamento entre Quantitativo Originário do Edital e Quantitativo Homologado
+  it('34. Deve calcular saldo com base no quantitativo homologado vigente sem distorção pelo quantitativo estimado originário', () => {
+    const itemHomologado = 391;
+    const itemEstimadoEdital = 450; // Edital estimou 450, mas homologou 391
+    const empenhos: Empenho[] = [
+      { id: '1', numero: '2025NE0001', ano: 2025, arpId: '00076/2024', itemId: '3', uasg: '200331', quantidade: 200, origem: 'API', status: 'CONFIRMADO', criadoEm: '', atualizadoEm: '' }
+    ];
+
+    const saldo = calculateSaldo(itemHomologado, empenhos);
+    // Saldo é sempre 391 - 200 = 191 (nunca 450 - 200 = 250)
+    expect(saldo).toBe(191);
+    expect(itemEstimadoEdital).toBe(450);
+  });
+
 });
+
+

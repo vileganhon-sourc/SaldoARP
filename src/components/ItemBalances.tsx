@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, ExternalLink, ChevronRight, ChevronDown, Check, X, Share2 } from 'lucide-react';
 import { fetchUnidadesItem, fetchEmpenhosSaldoItem, fetchPncpContracts, fetchPncpContractEmpenhos, fetchAdesoesItem, fetchContratosGovEmpenhos, fetchContratoEmpenhoDetalhe, fetchContratosGovData, getCanonicalContractKey } from '../services/api';
 import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks, fetchEmpenhoManualQuantities, fetchManualEmpenhos, saveManualEmpenhos, fetchManualContratos, saveManualContratos, fetchContratoEmpenhoLinks, saveContratoEmpenhoLinks } from '../services/allocationService';
-import { calculateSaldo, calculateTotalEmpenhado, reconcileBalances, matchAndMergeEmpenhos, normalizeEmpenhoNumero } from '../services/balanceService';
+import { calculateTotalEmpenhado, reconcileBalances, matchAndMergeEmpenhos, normalizeEmpenhoNumero, calculateAllocationsWithEmpenhos, calculateItemCardMetrics } from '../services/balanceService';
 import { cacheArpsInDb, cacheArpItemsInDb } from '../services/dbCacheService';
 import { fetchDepartments, type InternalDepartment } from '../services/unitService';
 import { ManageDepartmentsModal } from './ManageDepartmentsModal';
@@ -347,34 +347,10 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
 
   const enrichGovEmpenhosWithDetails = async (
     govEmps: ContratosGovEmpenhoRecord[],
-    contratoId?: number,
-    contratoObj?: PncpContract
+    _contratoId?: number,
+    _contratoObj?: PncpContract
   ): Promise<ContratosGovEmpenhoRecord[]> => {
-    let contractItems: any[] = [];
-    if (contratoId) {
-      try {
-        const itemsRes = await fetch(`/api-contratos-gov/api/contrato/${contratoId}/itens`);
-        if (itemsRes.ok) {
-          contractItems = await itemsRes.json();
-        }
-      } catch (e) {
-        console.warn('Erro ao carregar itens do contrato:', contratoId, e);
-      }
-    }
-
     const targetItemNum = parseInt(item.numeroItem, 10);
-    const matchedContractItem = Array.isArray(contractItems) ? contractItems.find((i: any) => {
-      const numComp = parseInt(i.numero_item_compra || '0', 10);
-      return numComp === targetItemNum;
-    }) : undefined;
-
-    const parseVal = (v: any) => {
-      if (typeof v === 'number') return v;
-      if (!v) return 0;
-      const clean = String(v).replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.').trim();
-      const n = parseFloat(clean);
-      return isNaN(n) ? 0 : n;
-    };
 
     const enriched = await Promise.all(
       govEmps.map(async (emp) => {
@@ -382,7 +358,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         let quantidadeFisica: number | undefined = undefined;
         let itensMinuta: any[] | undefined = undefined;
 
-        // Fonte 1: Tenta consultar a minuta individual do empenho (/consultar/{id})
+        // Fonte Única Oficial: Consulta a minuta individual do empenho (/consultar/{id})
         if (emp.id) {
           try {
             const detalhe = await fetchContratoEmpenhoDetalhe(emp.id);
@@ -394,40 +370,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
               }
             }
           } catch (e) {
-            // Ignora 401
-          }
-        }
-
-        const valEmp = parseVal(emp.empenhado);
-
-        // Fonte 2: Se a minuta individual der 401, usa os itens oficiais do Contrato (/api/contrato/{id}/itens)
-        if (quantidadeFisica === undefined && matchedContractItem && typeof matchedContractItem.quantidade === 'number') {
-          const itemValTotal = parseVal(matchedContractItem.valortotal || matchedContractItem.valor_total);
-          const itemValUnit = parseVal(matchedContractItem.valorunitario || matchedContractItem.valor_unitario);
-
-          if (itemValTotal > 0 && valEmp > 0 && Math.abs(valEmp - itemValTotal) < 1) {
-            quantidadeFisica = matchedContractItem.quantidade;
-          } else if (itemValUnit > 0 && valEmp > 0) {
-            const calculatedQty = Math.round(valEmp / itemValUnit);
-            if (calculatedQty > 0) {
-              quantidadeFisica = calculatedQty;
-            }
-          } else if (govEmps.length === 1 || (contractItems && contractItems.length === 1)) {
-            quantidadeFisica = matchedContractItem.quantidade;
-          }
-        }
-
-        // Fonte 3: Utiliza a quantidadeContratada oficial já presente no contratoObj
-        if (quantidadeFisica === undefined && contratoObj?.quantidadeContratada && contratoObj.quantidadeContratada > 0) {
-          const unitVal = contratoObj.valorUnitarioItem || parseVal(item.valorUnitario);
-          if (unitVal && unitVal > 0 && valEmp > 0) {
-            const calcQty = Math.round(valEmp / unitVal);
-            if (calcQty > 0) {
-              quantidadeFisica = calcQty;
-            }
-          }
-          if (quantidadeFisica === undefined && (govEmps.length === 1 || Math.abs(valEmp - parseVal(contratoObj.valorTotalItem)) < 1)) {
-            quantidadeFisica = contratoObj.quantidadeContratada;
+            // Ignora exceções de acesso à minuta
           }
         }
 
@@ -488,7 +431,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
           }
         }
         if (!govEmpsLoaded && contrato.uasg) {
-          const govData = await fetchContratosGovData(contrato.uasg, contrato.numeroContrato, contrato.anoContrato, ['200331', '200330', contrato.uasg]);
+          const govData = await fetchContratosGovData(contrato.uasg, contrato.numeroContrato, contrato.anoContrato);
           if (govData.contratoId) {
             contrato.contratoId = govData.contratoId;
             const rawGovEmps = await fetchContratosGovEmpenhos(govData.contratoId);
@@ -651,6 +594,9 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     await saveAllocations(itemKey, newAllocations);
   };
 
+  const gerenciadoraRecord = unidades.find(uni => uni.tipoUnidade === 'GERENCIADORA');
+  const totalUGQty = gerenciadoraRecord ? gerenciadoraRecord.quantidadeRegistrada : item.quantidadeHomologadaItem;
+
   const handleAddAllocation = (e: React.FormEvent) => {
     e.preventDefault();
     setAllocationError(null);
@@ -759,46 +705,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     setAllocationError(null);
   };
 
-  const recalculateAllocationsWithLinks = async (
-    linksMap: Record<string, string>,
-    manualQtdsMap: Record<string, number> = empenhoManualQuantities
-  ) => {
-    const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
-
-    const updatedAllocations = allocations.map(alloc => {
-      // 1. Empenhos do modulo-arp
-      const linkedArpEmpenhos = empenhos.filter(emp => linksMap[emp.unidade] === alloc.id || (emp.numeroEmpenho && linksMap[emp.numeroEmpenho] === alloc.id));
-      const totalArp = linkedArpEmpenhos.reduce((sum, curr) => sum + curr.quantidadeEmpenhada, 0);
-
-      // 2. Empenhos do Contratos.gov.br (usa quantidade física oficial da API ou ajuste manual do usuário)
-      let totalGov = 0;
-      Object.entries(contractGovEmpenhos).forEach(([, emps]) => {
-        emps.forEach(emp => {
-          const empKey = emp.numero || String(emp.id);
-          const isLinked = linksMap[emp.numero] === alloc.id || (emp.id && linksMap[String(emp.id)] === alloc.id);
-          if (isLinked) {
-            const info = getEmpenhoQuantityInfo(empKey, emp, manualQtdsMap);
-            totalGov += info.qty;
-          }
-        });
-      });
-
-      return {
-        ...alloc,
-        empenhadaQty: totalArp + totalGov
-      };
-    });
-
-    setAllocations(updatedAllocations);
-    await saveAllocations(itemKey, updatedAllocations);
-  };
-
-  useEffect(() => {
-    if (allocations.length > 0) {
-      recalculateAllocationsWithLinks(empenhoLinks, empenhoManualQuantities);
-    }
-  }, [contractGovEmpenhos, empenhos, empenhoLinks, empenhoManualQuantities]);
-
   const handleLinkEmpenho = async (empenhoUnidade: string, departmentId: string) => {
     const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
     const updatedLinks = {
@@ -811,7 +717,9 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     setEmpenhoLinks(updatedLinks);
     await saveEmpenhoLinks(itemKey, updatedLinks);
 
-    await recalculateAllocationsWithLinks(updatedLinks, empenhoManualQuantities);
+    const updatedAllocations = calculateAllocationsWithEmpenhos(allocations, allEmpenhos, updatedLinks);
+    setAllocations(updatedAllocations);
+    await saveAllocations(itemKey, updatedAllocations);
   };
 
   const formatCurrency = (val: number) => {
@@ -920,8 +828,12 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   // Calculate totals
   const totalRegistrado = unidades.reduce((acc, curr) => acc + curr.quantidadeRegistrada, 0);
   const totalSaldoRemanejamento = unidades.reduce((acc, curr) => acc + curr.saldoRemanejamentoEmpenho, 0);
-  const totalLimiteAdesao = unidades.reduce((acc, curr) => acc + curr.qtdLimiteAdesao, 0);
-  const totalSaldoAdesoes = unidades.reduce((acc, curr) => acc + curr.saldoAdesoes, 0);
+  const gerenciadoraUnit = unidades.find(u => u.tipoUnidade === 'GERENCIADORA');
+
+  const totalAdesaoRegistrada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeRegistrada) || 0), 0);
+  const totalAdesaoEmpenhada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeEmpenhada) || 0), 0);
+  const totalAdesaoSaldo = adesoes.reduce((acc, a) => acc + (Number(a.saldoEmpenho) || 0), 0);
+  const adesaoConsumidaPercent = totalAdesaoRegistrada > 0 ? (totalAdesaoEmpenhada / totalAdesaoRegistrada) * 100 : 0;
 
   // Relatório de Reconciliação Contábil Oficial do Item
   const reconciliationReport: ReconciliationReport = React.useMemo(() => {
@@ -934,46 +846,52 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
 
   // Fórmula Oficial do Saldo: Saldo = QuantidadeRegistrada - ∑ Empenhos
   const totalCalculatedEmpenhado = calculateTotalEmpenhado(allEmpenhos);
-  const officialCalculatedSaldo = calculateSaldo(item.quantidadeHomologadaItem, allEmpenhos);
 
-  // Consumed calculations
-  const totalConsumidoEmpenho = totalCalculatedEmpenhado;
-  const totalConsumidoAdesao = totalLimiteAdesao - totalSaldoAdesoes;
+  // Cálculo seguro e sem duplicidade das métricas dos cards de resumo
+  const cardMetrics = calculateItemCardMetrics({
+    quantidadeHomologada: item.quantidadeHomologadaItem || totalRegistrado,
+    totalEmpenhado: totalCalculatedEmpenhado,
+    maximoAdesaoItem: item.maximoAdesao,
+    totalAdesaoConsumida: totalAdesaoEmpenhada || totalAdesaoRegistrada,
+    valorUnitario: item.valorUnitario,
+    gerenciadoraLimiteAdesao: gerenciadoraUnit?.qtdLimiteAdesao
+  });
 
-  // Percentage calculations
-  const itemTotalQty = item.quantidadeHomologadaItem || totalRegistrado;
-  const empenhoPercent = itemTotalQty > 0 ? (Math.max(0, officialCalculatedSaldo) / itemTotalQty) * 100 : 0;
-  const empenhoConsumidoPercent = 100 - empenhoPercent;
-  const adsPercVal = totalLimiteAdesao > 0 ? (totalSaldoAdesoes / totalLimiteAdesao) * 100 : 0;
-  const adsConsPercVal = 100 - adsPercVal;
+  const {
+    officialSaldo: officialCalculatedSaldo,
+    totalEmpenhado: totalConsumidoEmpenho,
+    itemTotalQty,
+    empenhoConsumidoPercent,
+    rawEmpenhoPercentRestante,
+    empenhoPercentClamped,
+    limiteAdesao: totalLimiteAdesao,
+    totalConsumidoAdesao,
+    saldoAdesoes: totalSaldoAdesoes,
+    adsPercVal,
+    adsConsPercVal,
+    adsPercValClamped,
+    valorFinanceiroDisponivel,
+    valorFinanceiroConsumido
+  } = cardMetrics;
 
   // Dynamic Internal UG allocation calculations
-  const gerenciadoraRecord = unidades.find(uni => uni.tipoUnidade === 'GERENCIADORA');
+  // Cálculo seguro e sem duplicidade de consumo por Alocação Interna a partir da lista canônica unificada de empenhos
+  const allocationsWithEmpenho = React.useMemo(() => {
+    return calculateAllocationsWithEmpenhos(allocations, allEmpenhos, empenhoLinks);
+  }, [allocations, allEmpenhos, empenhoLinks]);
 
-  const totalUGQty = gerenciadoraRecord ? gerenciadoraRecord.quantidadeRegistrada : item.quantidadeHomologadaItem;
-
-  const allocationsWithEmpenho = allocations.map(alloc => {
-    // 1. Empenhos do modulo-arp (por unidade ou numeroEmpenho)
-    const linkedArpEmpenhos = empenhos.filter(emp => empenhoLinks[emp.unidade] === alloc.id || (emp.numeroEmpenho && empenhoLinks[emp.numeroEmpenho] === alloc.id));
-    const totalArpEmpenhada = linkedArpEmpenhos.reduce((sum, curr) => sum + curr.quantidadeEmpenhada, 0);
-
-    // 2. Empenhos do Contratos.gov.br vinculados por numeroEmpenho ou ID
-    let totalGovEmpenhada = 0;
-    Object.entries(contractGovEmpenhos).forEach(([, emps]) => {
-      emps.forEach(emp => {
-        const empKey = emp.numero || String(emp.id);
-        if (empenhoLinks[emp.numero] === alloc.id || (emp.id && empenhoLinks[String(emp.id)] === alloc.id)) {
-          const info = getEmpenhoQuantityInfo(empKey, emp, empenhoManualQuantities);
-          totalGovEmpenhada += info.qty;
-        }
-      });
-    });
-
-    return {
-      ...alloc,
-      empenhadaQty: totalArpEmpenhada + totalGovEmpenhada
-    };
-  });
+  // Sincroniza as quantidades empenhadas com o storage caso haja discrepância
+  useEffect(() => {
+    if (allocations.length > 0 && allEmpenhos.length > 0) {
+      const updatedAllocations = calculateAllocationsWithEmpenhos(allocations, allEmpenhos, empenhoLinks);
+      const hasDiff = updatedAllocations.some((u, i) => u.empenhadaQty !== allocations[i]?.empenhadaQty);
+      if (hasDiff) {
+        setAllocations(updatedAllocations);
+        const itemKey = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`;
+        saveAllocations(itemKey, updatedAllocations);
+      }
+    }
+  }, [allEmpenhos, empenhoLinks]);
 
   const totalAllocatedSum = allocationsWithEmpenho.reduce((acc, curr) => acc + curr.allocatedQty, 0);
   const totalEmpenhadaSum = allocationsWithEmpenho.reduce((acc, curr) => acc + curr.empenhadaQty, 0);
@@ -986,11 +904,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     if (a.tipoUnidade !== 'GERENCIADORA' && b.tipoUnidade === 'GERENCIADORA') return 1;
     return 0;
   });
-
-  const totalAdesaoRegistrada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeRegistrada) || 0), 0);
-  const totalAdesaoEmpenhada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeEmpenhada) || 0), 0);
-  const totalAdesaoSaldo = adesoes.reduce((acc, a) => acc + (Number(a.saldoEmpenho) || 0), 0);
-  const adesaoConsumidaPercent = totalAdesaoRegistrada > 0 ? (totalAdesaoEmpenhada / totalAdesaoRegistrada) * 100 : 0;
 
   const getProgressColorClass = (percent: number) => {
     if (percent < 20) return 'fill-danger';
@@ -1082,19 +995,24 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                 </span>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                   de {formatNumber(itemTotalQty)} un
+                  {item.quantidadeEstimadaEdital && item.quantidadeEstimadaEdital !== itemTotalQty && (
+                    <span style={{ marginLeft: '0.25rem', opacity: 0.8, fontWeight: 500 }} title={`Quantitativo originário do edital: ${formatNumber(item.quantidadeEstimadaEdital)} un`}>
+                      (Edital: {formatNumber(item.quantidadeEstimadaEdital)})
+                    </span>
+                  )}
                 </span>
               </div>
               
               <div className="progress-container" style={{ marginTop: '0.75rem' }}>
                 <div className="progress-track">
                   <div 
-                    className={`progress-fill ${getProgressColorClass(empenhoPercent)}`}
-                    style={{ width: `${empenhoPercent}%` }}
+                    className={`progress-fill ${getProgressColorClass(empenhoPercentClamped)}`}
+                    style={{ width: `${empenhoPercentClamped}%` }}
                   ></div>
                 </div>
                 <div className="progress-label-row">
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Consumido: {formatNumber(totalConsumidoEmpenho)} ({formatNumber(empenhoConsumidoPercent)}%)</span>
-                  <span style={{ fontWeight: 700, fontSize: '0.7rem', color: empenhoPercent < 20 ? 'var(--danger)' : 'var(--success)' }}>{formatNumber(empenhoPercent)}% restante</span>
+                  <span style={{ fontWeight: 700, fontSize: '0.7rem', color: rawEmpenhoPercentRestante < 20 ? 'var(--danger)' : 'var(--success)' }}>{formatNumber(rawEmpenhoPercentRestante)}% restante</span>
                 </div>
               </div>
             </div>
@@ -1127,13 +1045,13 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
               <div className="progress-container" style={{ marginTop: '0.75rem' }}>
                 <div className="progress-track">
                   <div 
-                    className={`progress-fill ${getProgressColorClass(adsPercVal)}`}
-                    style={{ width: `${adsPercVal}%` }}
+                    className={`progress-fill ${getProgressColorClass(adsPercValClamped)}`}
+                    style={{ width: `${adsPercValClamped}%` }}
                   ></div>
                 </div>
                 <div className="progress-label-row">
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Consumido: {formatNumber(totalConsumidoAdesao)} ({formatNumber(adsConsPercVal)}%)</span>
-                  <span style={{ fontWeight: 700, fontSize: '0.7rem', color: adsPercVal < 20 ? 'var(--danger)' : 'var(--accent)' }}>{formatNumber(adsPercVal)}% restante</span>
+                  <span style={{ fontWeight: 700, fontSize: '0.7rem', color: adsPercValClamped < 20 ? 'var(--danger)' : 'var(--accent)' }}>{formatNumber(adsPercVal)}% restante</span>
                 </div>
               </div>
             </div>
@@ -1146,11 +1064,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
             </div>
             <div className="balance-info-wrap">
               <span className="meta-label">Valor Financeiro Disponível (Empenho)</span>
-              <span className="balance-val" style={{ color: 'var(--success)', marginTop: '0.25rem' }}>
-                {formatCurrency(totalSaldoRemanejamento * item.valorUnitario)}
+              <span className="balance-val" style={{ color: valorFinanceiroDisponivel < 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.25rem' }}>
+                {formatCurrency(valorFinanceiroDisponivel)}
               </span>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                Total consumido: {formatCurrency(totalConsumidoEmpenho * item.valorUnitario)}
+                Total consumido: {formatCurrency(valorFinanceiroConsumido)}
               </span>
             </div>
           </div>
@@ -1270,15 +1188,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                     <th>Tipo</th>
                     <th>Original Registrado</th>
                     <th style={{ width: '220px' }}>Saldo p/ Empenho</th>
-                    <th>Limite Adesão (Carona)</th>
-                    <th style={{ width: '220px' }}>Saldo p/ Adesão</th>
-                    <th>Aceita Carona?</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedUnidades.map((uni, idx) => {
                     const empPerc = uni.quantidadeRegistrada > 0 ? (uni.saldoRemanejamentoEmpenho / uni.quantidadeRegistrada) * 100 : 0;
-                    const adePerc = uni.qtdLimiteAdesao > 0 ? (uni.saldoAdesoes / uni.qtdLimiteAdesao) * 100 : 0;
 
                     return (
                       <tr key={`${uni.codigoUnidade}-${idx}`}>
@@ -1311,34 +1225,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                               ></div>
                             </div>
                           </div>
-                        </td>
-                        <td style={{ fontWeight: 600, fontFamily: 'monospace', color: uni.qtdLimiteAdesao > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                          {uni.qtdLimiteAdesao > 0 ? formatNumber(uni.qtdLimiteAdesao) : '-'}
-                        </td>
-                        <td>
-                          {uni.qtdLimiteAdesao > 0 ? (
-                            <div className="progress-container">
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                                <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{formatNumber(uni.saldoAdesoes)}</span>
-                                <span style={{ color: 'var(--text-muted)' }}>{formatNumber(adePerc)}%</span>
-                              </div>
-                              <div className="progress-track" style={{ height: '6px' }}>
-                                <div 
-                                  className={`progress-fill ${getProgressColorClass(adePerc)}`}
-                                  style={{ width: `${adePerc}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>N/A</span>
-                          )}
-                        </td>
-                        <td>
-                          {uni.aceitaAdesao ? (
-                            <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>Sim</span>
-                          ) : (
-                            <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>Não</span>
-                          )}
                         </td>
                       </tr>
                     );
@@ -1381,66 +1267,89 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  {[
-                    {
-                      title: 'Unidade Gestora (Gerenciadora)',
-                      icon: <Building2 size={16} color="var(--primary)" />,
-                      list: [
-                        ...contracts.filter(c => {
-                          const u = String(c.uasg || '').trim();
-                          if (u === '200331' || u === '200330') return true;
-                          if (c.tipoUnidade === 'GERENCIADORA') return true;
-                          return false;
-                        }),
-                        ...manualContratos
-                          .filter(mc => mc.uasg === '200331' || mc.uasg === '200330')
-                          .map(mc => ({
-                            numeroContrato: mc.numero,
-                            anoContrato: mc.ano,
-                            uasg: mc.uasg,
-                            orgaoNome: 'SENASP / MJSP',
-                            nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
-                            niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
-                            numeroControlePncp: mc.numeroControlePncp,
-                            linkVisualizacao: mc.linkPncp,
-                            tipoUnidade: 'GERENCIADORA',
-                            _isManual: true,
-                            _manualId: mc.id
-                          } as any))
-                      ],
-                      badgeClass: 'badge-info',
-                      badgeLabel: 'Órgão Gerenciador'
-                    },
-                    {
-                      title: 'Participantes',
-                      icon: <Users size={16} color="#0f766e" />,
-                      list: [
-                        ...contracts.filter(c => {
-                          const u = String(c.uasg || '').trim();
-                          if (u === '200331' || u === '200330') return false;
-                          if (c.tipoUnidade === 'GERENCIADORA') return false;
-                          return true;
-                        }),
-                        ...manualContratos
-                          .filter(mc => mc.uasg !== '200331' && mc.uasg !== '200330')
-                          .map(mc => ({
-                            numeroContrato: mc.numero,
-                            anoContrato: mc.ano,
-                            uasg: mc.uasg,
-                            orgaoNome: `UASG ${mc.uasg}`,
-                            nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
-                            niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
-                            numeroControlePncp: mc.numeroControlePncp,
-                            linkVisualizacao: mc.linkPncp,
-                            tipoUnidade: 'PARTICIPANTE',
-                            _isManual: true,
-                            _manualId: mc.id
-                          } as any))
-                      ],
-                      badgeClass: 'badge-success',
-                      badgeLabel: 'Órgãos Participantes'
-                    }
-                  ].map((section, sidx) => (
+                  {(() => {
+                    const deduplicateContractsList = (list: any[]) => {
+                      const map = new Map<string, any>();
+                      list.forEach((c, idx) => {
+                        const canKey = getCanonicalContractKey(c.numeroContrato, c.anoContrato, c.numeroControlePncp) || `contract-${idx}`;
+                        if (!map.has(canKey)) {
+                          map.set(canKey, c);
+                        } else {
+                          const existing = map.get(canKey)!;
+                          map.set(canKey, {
+                            ...existing,
+                            ...c,
+                            _isManual: existing._isManual || c._isManual,
+                            _manualId: existing._manualId || c._manualId,
+                            quantidadeContratada: existing.quantidadeContratada ?? c.quantidadeContratada,
+                            linkVisualizacao: existing.linkVisualizacao || c.linkVisualizacao
+                          });
+                        }
+                      });
+                      return Array.from(map.values());
+                    };
+
+                    return [
+                      {
+                        title: 'Unidade Gestora (Gerenciadora)',
+                        icon: <Building2 size={16} color="var(--primary)" />,
+                        list: deduplicateContractsList([
+                          ...contracts.filter(c => {
+                            const u = String(c.uasg || '').trim();
+                            if (u === '200331' || u === '200330') return true;
+                            if (c.tipoUnidade === 'GERENCIADORA') return true;
+                            return false;
+                          }),
+                          ...manualContratos
+                            .filter(mc => mc.uasg === '200331' || mc.uasg === '200330')
+                            .map(mc => ({
+                              numeroContrato: mc.numero,
+                              anoContrato: mc.ano,
+                              uasg: mc.uasg,
+                              orgaoNome: 'SENASP / MJSP',
+                              nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
+                              niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
+                              numeroControlePncp: mc.numeroControlePncp,
+                              linkVisualizacao: mc.linkPncp,
+                              tipoUnidade: 'GERENCIADORA',
+                              _isManual: true,
+                              _manualId: mc.id
+                            } as any))
+                        ]),
+                        badgeClass: 'badge-info',
+                        badgeLabel: 'Órgão Gerenciador'
+                      },
+                      {
+                        title: 'Participantes',
+                        icon: <Users size={16} color="#0f766e" />,
+                        list: deduplicateContractsList([
+                          ...contracts.filter(c => {
+                            const u = String(c.uasg || '').trim();
+                            if (u === '200331' || u === '200330') return false;
+                            if (c.tipoUnidade === 'GERENCIADORA') return false;
+                            return true;
+                          }),
+                          ...manualContratos
+                            .filter(mc => mc.uasg !== '200331' && mc.uasg !== '200330')
+                            .map(mc => ({
+                              numeroContrato: mc.numero,
+                              anoContrato: mc.ano,
+                              uasg: mc.uasg,
+                              orgaoNome: `UASG ${mc.uasg}`,
+                              nomeRazaoSocialFornecedor: mc.fornecedor || item.nomeRazaoSocialFornecedor,
+                              niFornecedor: mc.cnpjFornecedor || item.niFornecedor,
+                              numeroControlePncp: mc.numeroControlePncp,
+                              linkVisualizacao: mc.linkPncp,
+                              tipoUnidade: 'PARTICIPANTE',
+                              _isManual: true,
+                              _manualId: mc.id
+                            } as any))
+                        ]),
+                        badgeClass: 'badge-success',
+                        badgeLabel: 'Órgãos Participantes'
+                      }
+                    ];
+                  })().map((section, sidx) => (
                     <div key={`contract-sec-${sidx}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f1f5f9', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
@@ -1476,7 +1385,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                 const isExpanded = !!expandedContracts[c.numeroContrato] || !!expandedContracts[canKey];
                                 const govEmps = contractGovEmpenhos[c.numeroContrato] || contractGovEmpenhos[canKey];
                                 const pncpEmps = contractEmpenhos[c.numeroContrato] || contractEmpenhos[canKey];
-                                const isLoadingEmps = !!empenhosLoadingMap[c.numeroContrato] || !!empenhosLoadingMap[canKey];
 
                                 const displayNumeroContrato = (() => {
                                   const num = c.numeroContrato;
@@ -1488,6 +1396,10 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
 
                                 const isGer = section.title.includes('Gerenciadora');
                                 const contractUasg = c.uasg || (isGer ? (arp.codigoUnidadeGerenciadora || '200331') : '');
+                                const matchedUnit = unidades.find(u => String(u.codigoUnidade).trim() === String(contractUasg).trim());
+                                const resolvedOrgaoName = isGer
+                                  ? (arp.nomeOrgao || arp.nomeUnidadeGerenciadora || c.orgaoNome)
+                                  : (matchedUnit?.nomeUnidade || (c.orgaoNome && !c.orgaoNome.includes('SECRETARIA NACIONAL') ? c.orgaoNome : `Órgão Participante`));
 
                                 return (
                                   <React.Fragment key={`${c.numeroContrato}-${idx}`}>
@@ -1506,7 +1418,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                       </td>
                                       <td style={{ fontSize: '0.85rem' }}>
                                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                          {c.orgaoNome || c.unidadeNome || arp.nomeOrgao || arp.nomeUnidadeGerenciadora || arp.codigoUnidadeGerenciadora}
+                                          {resolvedOrgaoName}
                                           {contractUasg ? (
                                             <span style={{ marginLeft: '0.4rem', fontSize: '0.74rem', color: '#1d4ed8', fontWeight: 600, background: '#eff6ff', padding: '0.1rem 0.35rem', borderRadius: '4px', border: '1px solid #bfdbfe' }}>
                                               UASG: {contractUasg}
@@ -1577,20 +1489,15 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                               <DollarSign size={14} color="var(--primary)" /> Empenhos Vinculados a este Contrato ({govEmps?.length || pncpEmps?.length || 0})
                                             </h5>
                                             
-                                            {isLoadingEmps ? (
-                                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '0.5rem 0' }}>
-                                                <div className="spinner" style={{ width: '14px', height: '14px' }}></div>
-                                                <span>Buscando empenhos do contrato...</span>
-                                              </div>
-                                            ) : govEmps && govEmps.length > 0 ? (
-                                              <div style={{ overflowX: 'auto' }}>
-                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', marginTop: '0.25rem' }}>
+                                            {(govEmps && govEmps.length > 0) ? (
+                                              <div className="table-container" style={{ marginTop: 0, overflowX: 'auto' }}>
+                                                <table className="custom-table" style={{ fontSize: '0.78rem' }}>
                                                   <thead>
-                                                    <tr style={{ borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                                                    <tr style={{ background: '#f1f5f9' }}>
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>N.º Empenho</th>
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Órgão / UG</th>
-                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '200px' }}>Unidade Interna</th>
-                                                      <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', minWidth: '140px' }}>Qtd Física (Item)</th>
+                                                      <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Unidade Interna</th>
+                                                      <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Qtd Física (Item)</th>
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Data de Emissão</th>
                                                       <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Empenhado</th>
                                                     </tr>
@@ -1604,8 +1511,8 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                       return (
                                                         <tr key={`${emp.numero}-${eidx}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                                           <td style={{ padding: '6px 8px', fontWeight: 700, color: '#0c326f', fontFamily: 'monospace' }}>{emp.numero}</td>
-                                                          <td style={{ padding: '6px 8px', color: 'var(--text-primary)' }}>
-                                                            {c.orgaoNome || (emp.unidade_gestora ? `UASG ${emp.unidade_gestora}` : '-')}
+                                                          <td style={{ padding: '6px 8px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                                            {isGer ? (arp.nomeOrgao || 'SENASP / MJSP') : resolvedOrgaoName}
                                                           </td>
                                                           <td style={{ padding: '6px 8px' }}>
                                                             {allocations.length === 0 ? (
@@ -1627,16 +1534,24 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                                 }}
                                                               >
                                                                 <option value="">Não vinculado</option>
-                                                                {allocations.map(a => (
+                                                                {allocationsWithEmpenho.map(a => (
                                                                   <option key={a.id} value={a.id}>
-                                                                    {a.unitName} (Saldo: {formatNumber(a.allocatedQty - a.empenhadaQty)} un)
+                                                                    {a.unitName} (Saldo: {formatNumber(a.saldoQty != null ? a.saldoQty : (a.allocatedQty - a.empenhadaQty))} un)
                                                                   </option>
                                                                 ))}
                                                               </select>
                                                             )}
                                                           </td>
-                                                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 700, color: 'var(--success)' }}>
-                                                            {formatNumber(qtyInfo.qty)} un
+                                                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 700 }}>
+                                                            {qtyInfo.isOfficial ? (
+                                                              <span style={{ color: 'var(--success)' }}>{formatNumber(qtyInfo.qty)} un</span>
+                                                            ) : qtyInfo.isManual ? (
+                                                              <span style={{ color: 'var(--warning)' }}>{formatNumber(qtyInfo.qty)} un (Manual)</span>
+                                                            ) : (
+                                                              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
+                                                                N/D
+                                                              </span>
+                                                            )}
                                                           </td>
                                                           <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{formatDate(emp.data_emissao)}</td>
                                                           <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>
@@ -1752,9 +1667,9 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                   }}
                                 >
                                   <option value="">Não vinculado</option>
-                                  {allocations.map(a => (
+                                  {allocationsWithEmpenho.map(a => (
                                     <option key={a.id} value={a.id}>
-                                      {a.unitName} (Saldo: {formatNumber(a.allocatedQty - a.empenhadaQty)} un)
+                                      {a.unitName} (Saldo: {formatNumber(a.saldoQty != null ? a.saldoQty : (a.allocatedQty - a.empenhadaQty))} un)
                                     </option>
                                   ))}
                                 </select>

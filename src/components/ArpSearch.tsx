@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Calendar, FileText, Building2, HelpCircle, DollarSign, Users, TrendingUp, BarChart2, ArrowUpRight } from 'lucide-react';
-import { fetchArps, fetchArpItems, fetchArpItemsBatch } from '../services/api';
+import { fetchArps, fetchArpItems, fetchArpItemsBatch, enrichArpsBatchWithPncpVigencia } from '../services/api';
 import { fetchAtasWithEmpenhosSet, fetchAtasWithAllocationsSet } from '../services/dbCacheService';
 import type { ArpRecord, ArpItemRecord, FilterParams } from '../types';
 import { AtaCard } from './cards/AtaCard';
@@ -114,6 +114,11 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
       setItemsByAta(batchItems);
       if (results.length === 0) {
         setError('Nenhuma Ata encontrada para os filtros especificados.');
+      } else {
+        // Enriquecer em segundo plano a vigência oficial das Atas com o PNCP
+        enrichArpsBatchWithPncpVigencia(results, (updated) => setArps(updated)).catch((e) => {
+          console.warn('Erro na sincronização de vigência PNCP em segundo plano:', e);
+        });
       }
     } catch (err: any) {
       setError(err.message || 'Falha ao buscar as Atas de Registro de Preço na API.');
@@ -270,7 +275,7 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   // Process filters and sorting on the clientside
   const processedArps = arps
     .filter(arp => {
-      const isExpired = new Date(arp.dataVigenciaFinal) < new Date();
+      const isExpired = !!(arp.isCanceladaPncp || new Date(arp.dataVigenciaFinal) < new Date());
       if (filterVigencia === 'VIGENTE') return !isExpired;
       if (filterVigencia === 'EXPIRADA') return isExpired;
       return true;

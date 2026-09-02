@@ -30,7 +30,16 @@ export const AtaCardHeader: React.FC<AtaCardHeaderProps> = ({
         </p>
       </div>
 
-      <div className="ata-card-header-right">
+      <div className="ata-card-header-right" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        {arp.prorrogadaPncp && (
+          <span 
+            className="badge badge-prorrogada" 
+            title={`Vigência prorrogada oficialmente no PNCP até ${arp.dataVigenciaFinal}`}
+            style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 600 }}
+          >
+            Prorrogada PNCP
+          </span>
+        )}
         <AdesaoStatusBadge status={adesaoStatus} />
       </div>
     </header>

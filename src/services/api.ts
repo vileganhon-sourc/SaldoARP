@@ -100,6 +100,18 @@ export async function fetchArps(params: FilterParams): Promise<ArpResponse> {
       }
     }
 
+    // Carregar Atas publicadas via Contratos.gov.br diretamente do PNCP
+    const supplementalArps = await fetchSupplementalPncpArps(params.codigoUnidadeGerenciadora);
+    for (const sArp of supplementalArps) {
+      if (params.numeroAtaRegistroPreco && !sArp.numeroAtaRegistroPreco.includes(params.numeroAtaRegistroPreco)) {
+        continue;
+      }
+      const key = `${sArp.numeroAtaRegistroPreco}-${sArp.codigoUnidadeGerenciadora}`;
+      if (!allArpsMap.has(key)) {
+        allArpsMap.set(key, sArp);
+      }
+    }
+
     const mergedList = Array.from(allArpsMap.values());
     mergedList.sort((a, b) => b.dataVigenciaFinal.localeCompare(a.dataVigenciaFinal));
 
@@ -120,6 +132,248 @@ export async function fetchArps(params: FilterParams): Promise<ArpResponse> {
       totalPaginas: 1,
       paginasRestantes: 0
     };
+  }
+}
+
+export interface PncpAtaVigenciaInfo {
+  dataVigenciaFim?: string;
+  cancelado?: boolean;
+  dataCancelamento?: string | null;
+  dataAtualizacao?: string;
+}
+
+/**
+ * Consulta a vigência oficial atualizada da Ata diretamente no PNCP
+ * Endpoint: GET /api-pncp/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{seqCompra}/atas/{seqAta}
+ */
+export async function fetchPncpAtaVigencia(numeroControlePncpAta?: string): Promise<PncpAtaVigenciaInfo | null> {
+  if (!numeroControlePncpAta) return null;
+  const match = numeroControlePncpAta.match(/^(\d{14})-1-(\d{6})\/(\d{4})-(\d{6})$/);
+  if (!match) return null;
+
+  const cnpj = match[1];
+  const seqCompra = parseInt(match[2], 10);
+  const ano = match[3];
+  const seqAta = parseInt(match[4], 10);
+
+  try {
+    const url = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${ano}/${seqCompra}/atas/${seqAta}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        dataVigenciaFim: data.dataVigenciaFim,
+        cancelado: data.cancelado,
+        dataCancelamento: data.dataCancelamento,
+        dataAtualizacao: data.dataAtualizacao
+      };
+    }
+  } catch (e) {
+    console.warn(`Falha na consulta de vigência PNCP para a ata ${numeroControlePncpAta}:`, e);
+  }
+  return null;
+}
+
+/**
+ * Enriquece o registro da Ata com os dados oficiais de vigência retornados pelo PNCP
+ */
+export function enrichArpWithPncpVigencia(arp: ArpRecord, pncpInfo?: PncpAtaVigenciaInfo | null): ArpRecord {
+  if (!pncpInfo) return arp;
+  const pncpFim = pncpInfo.dataVigenciaFim ? pncpInfo.dataVigenciaFim.split('T')[0] : '';
+  const currentFim = arp.dataVigenciaFinal ? arp.dataVigenciaFinal.split('T')[0] : '';
+  
+  const isProrrogada = !!(pncpFim && currentFim && pncpFim > currentFim);
+  const effectiveFim = isProrrogada ? pncpFim : arp.dataVigenciaFinal;
+
+  return {
+    ...arp,
+    dataVigenciaFinal: effectiveFim,
+    dataVigenciaFinalPncp: pncpFim || undefined,
+    isCanceladaPncp: pncpInfo.cancelado,
+    prorrogadaPncp: isProrrogada,
+    dataAtualizacaoPncp: pncpInfo.dataAtualizacao
+  };
+}
+
+/**
+ * Enriquece em lote uma lista de Atas com as vigências oficiais do PNCP
+ */
+export async function enrichArpsBatchWithPncpVigencia(
+  arpsList: ArpRecord[],
+  onUpdateProgress?: (updatedArps: ArpRecord[]) => void
+): Promise<ArpRecord[]> {
+  if (!arpsList || arpsList.length === 0) return [];
+  const results = [...arpsList];
+
+  const batchSize = 6;
+  for (let i = 0; i < results.length; i += batchSize) {
+    const batch = results.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (arp, bIdx) => {
+        const globalIdx = i + bIdx;
+        if (arp.numeroControlePncpAta) {
+          const info = await fetchPncpAtaVigencia(arp.numeroControlePncpAta);
+          if (info) {
+            results[globalIdx] = enrichArpWithPncpVigencia(arp, info);
+          }
+        }
+      })
+    );
+    if (onUpdateProgress) {
+      onUpdateProgress([...results]);
+    }
+  }
+
+  cacheArpsInDb(results);
+  return results;
+}
+
+export const SUPPLEMENTAL_PNCP_ATAS = [
+  { anoCompra: '2025', seqCompra: 1102, seqAta: 1, numeroAta: '00069/2025' },
+  { anoCompra: '2025', seqCompra: 1576, seqAta: 2, numeroAta: '00023/2026' },
+  { anoCompra: '2025', seqCompra: 1665, seqAta: 1, numeroAta: '00039/2026' },
+  { anoCompra: '2025', seqCompra: 1665, seqAta: 2, numeroAta: '00040/2026' },
+  { anoCompra: '2025', seqCompra: 1331, seqAta: 1, numeroAta: '00041/2026' }
+];
+
+export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<ArpRecord[]> {
+  if (targetUasg && targetUasg !== '200331') return [];
+  const cnpj = '00394494000136';
+  const supplemental: ArpRecord[] = [];
+
+  await Promise.all(
+    SUPPLEMENTAL_PNCP_ATAS.map(async (item) => {
+      try {
+        const url = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${item.anoCompra}/${item.seqCompra}/atas/${item.seqAta}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const d = await res.json();
+          const anoAta = String(d.anoAta || item.numeroAta.split('/')[1]);
+          const numAta = String(d.numeroAtaRegistroPreco || item.numeroAta.split('/')[0]).padStart(5, '0');
+          const fullNumAta = `${numAta}/${anoAta}`;
+
+          const arpRec: ArpRecord = {
+            numeroAtaRegistroPreco: fullNumAta,
+            codigoUnidadeGerenciadora: d.unidadeOrgao?.codigoUnidade || '200331',
+            nomeUnidadeGerenciadora: d.unidadeOrgao?.nomeUnidade || 'SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP',
+            codigoOrgao: 30911,
+            nomeOrgao: 'SECRETARIA NACIONAL DE SEGURANCA PUBLICA',
+            linkAtaPNCP: `https://pncp.gov.br/app/atas/${cnpj}/${item.anoCompra}/${item.seqCompra}/${item.seqAta}`,
+            linkCompraPNCP: `https://pncp.gov.br/app/editais/${cnpj}/${item.anoCompra}/${String(item.seqCompra).padStart(6, '0')}`,
+            numeroCompra: String(item.seqCompra),
+            anoCompra: item.anoCompra,
+            codigoModalidadeCompra: '05',
+            nomeModalidadeCompra: d.modalidadeNome || 'Pregão',
+            dataAssinatura: d.dataAssinatura || '',
+            dataVigenciaInicial: d.dataVigenciaInicio || '',
+            dataVigenciaFinal: d.dataVigenciaFim || '',
+            valorTotal: 0,
+            statusAta: 'Ata de Registro de Preços',
+            objeto: d.objetoCompra || '',
+            quantidadeItens: 1,
+            dataHoraAtualizacao: d.dataAtualizacao || '',
+            dataHoraInclusao: d.dataInclusao || '',
+            dataHoraExclusao: null,
+            ataExcluido: false,
+            numeroControlePncpAta: d.numeroControlePNCP || `${cnpj}-1-${String(item.seqCompra).padStart(6, '0')}/${item.anoCompra}-${String(item.seqAta).padStart(6, '0')}`,
+            numeroControlePncpCompra: d.numeroControlePncpCompra || `${cnpj}-1-${String(item.seqCompra).padStart(6, '0')}/${item.anoCompra}`,
+            idCompra: `20033105${String(item.seqCompra)}${item.anoCompra}`,
+            dataVigenciaFinalPncp: d.dataVigenciaFim,
+            isCanceladaPncp: !!d.cancelado,
+            prorrogadaPncp: false
+          };
+          supplemental.push(arpRec);
+        }
+      } catch (e) {
+        console.warn(`Erro ao carregar Ata suplementar PNCP ${item.numeroAta}:`, e);
+      }
+    })
+  );
+
+  return supplemental;
+}
+
+export async function fetchPncpCompraItems(
+  anoCompra: string,
+  seqCompra: number | string,
+  numeroAta: string,
+  uasg: string
+): Promise<ArpItemRecord[]> {
+  const cnpj = '00394494000136';
+  try {
+    const itemsUrl = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${anoCompra}/${seqCompra}/itens`;
+    const res = await fetch(itemsUrl);
+    if (!res.ok) return [];
+    const itemsData = await res.json();
+    if (!Array.isArray(itemsData)) return [];
+
+    const arpItems: ArpItemRecord[] = await Promise.all(
+      itemsData.map(async (it: any) => {
+        let niFornecedor = '';
+        let nomeRazaoSocialFornecedor = '';
+        let valorUnitario = it.valorUnitarioEstimado || 0;
+        let valorTotal = it.valorTotal || 0;
+        let quantidadeHomologada = it.quantidade || 0;
+
+        try {
+          const resUrl = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${anoCompra}/${seqCompra}/itens/${it.numeroItem}/resultados`;
+          const resResponse = await fetch(resUrl);
+          if (resResponse.ok) {
+            const resultsData = await resResponse.json();
+            if (Array.isArray(resultsData) && resultsData.length > 0) {
+              const r = resultsData[0];
+              niFornecedor = r.niFornecedor || '';
+              nomeRazaoSocialFornecedor = r.nomeRazaoSocialFornecedor || '';
+              if (r.valorUnitarioHomologado) valorUnitario = r.valorUnitarioHomologado;
+              if (r.valorTotalHomologado) valorTotal = r.valorTotalHomologado;
+              if (r.quantidadeHomologada) quantidadeHomologada = r.quantidadeHomologada;
+            }
+          }
+        } catch {}
+
+        return {
+          numeroAtaRegistroPreco: numeroAta,
+          codigoUnidadeGerenciadora: uasg || '200331',
+          numeroCompra: String(seqCompra),
+          anoCompra: String(anoCompra),
+          codigoModalidadeCompra: '05',
+          dataAssinatura: '',
+          dataVigenciaInicial: '',
+          dataVigenciaFinal: '',
+          numeroItem: String(it.numeroItem).padStart(5, '0'),
+          codigoItem: it.numeroItem,
+          descricaoItem: it.descricao || '',
+          tipoItem: it.materialOuServicoNome || 'Material',
+          quantidadeHomologadaItem: quantidadeHomologada,
+          classificacaoFornecedor: '001',
+          niFornecedor: niFornecedor,
+          nomeRazaoSocialFornecedor: nomeRazaoSocialFornecedor,
+          quantidadeHomologadaVencedor: quantidadeHomologada,
+          valorUnitario: valorUnitario,
+          valorTotal: valorTotal,
+          maximoAdesao: 0,
+          nomeUnidadeGerenciadora: 'SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP',
+          nomeModalidadeCompra: 'Pregão',
+          idCompra: `20033105${seqCompra}${anoCompra}`,
+          numeroControlePncpCompra: `${cnpj}-1-${String(seqCompra).padStart(6, '0')}/${anoCompra}`,
+          dataHoraInclusao: it.dataInclusao || '',
+          dataHoraAtualizacao: it.dataAtualizacao || '',
+          quantidadeEmpenhada: 0,
+          percentualMaiorDesconto: 0,
+          situacaoSicaf: '1',
+          dataHoraExclusao: null,
+          itemExcluido: false,
+          numeroControlePncpAta: '',
+          codigoPdm: 0,
+          nomePdm: it.descricao || '',
+          quantidadeEstimadaEdital: it.quantidade || quantidadeHomologada
+        } as ArpItemRecord;
+      })
+    );
+    return arpItems;
+  } catch (e) {
+    console.warn(`Erro ao carregar itens da compra ${seqCompra}/${anoCompra} no PNCP:`, e);
+    return [];
   }
 }
 
@@ -174,6 +428,18 @@ export async function fetchArpItems(
           item.numeroAtaRegistroPreco.includes(numeroAtaRegistroPreco) ||
           numeroAtaRegistroPreco.includes(item.numeroAtaRegistroPreco)
         );
+      }
+    }
+
+    // 3. Se não encontrou no Compras.gov, busca diretamente na compra do PNCP (Atas cadastradas via Contratos.gov.br)
+    if (foundItems.length === 0) {
+      const cleanTargetAta = numeroAtaRegistroPreco.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
+      const supp = SUPPLEMENTAL_PNCP_ATAS.find(s => {
+        const sNum = s.numeroAta.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
+        return sNum === cleanTargetAta;
+      });
+      if (supp) {
+        foundItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, numeroAtaRegistroPreco, codigoUnidadeGerenciadora);
       }
     }
 
@@ -251,6 +517,21 @@ export async function fetchArpItemsBatch(params: FilterParams): Promise<Record<s
           currentPage++;
         } else {
           hasMorePages = false;
+        }
+      }
+    }
+
+    // Carregar itens das atas suplementares do PNCP
+    const suppArps = await fetchSupplementalPncpArps(params.codigoUnidadeGerenciadora);
+    for (const supp of SUPPLEMENTAL_PNCP_ATAS) {
+      const sArp = suppArps.find(a => a.numeroAtaRegistroPreco.includes(supp.numeroAta));
+      if (sArp) {
+        const key = `${sArp.numeroAtaRegistroPreco}-${sArp.codigoUnidadeGerenciadora}`;
+        if (!itemsMap[key] || itemsMap[key].length === 0) {
+          const suppItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, sArp.numeroAtaRegistroPreco, sArp.codigoUnidadeGerenciadora);
+          if (suppItems.length > 0) {
+            itemsMap[key] = suppItems;
+          }
         }
       }
     }
@@ -363,48 +644,55 @@ export function getCanonicalContractKey(
   anoRaw?: string | number,
   numeroControlePncp?: string
 ): string {
+  const cleanNum = String(numeroRaw || '').trim();
+
+  if (cleanNum) {
+    const neMatch = cleanNum.match(/^(\d{4})NE(\d+)$/i);
+    if (neMatch) {
+      return `${neMatch[1]}NE${parseInt(neMatch[2], 10)}`;
+    }
+
+    if (cleanNum.includes('/')) {
+      const parts = cleanNum.split('/');
+      const n = parseInt(parts[0].replace(/\D/g, ''), 10);
+      let a = parts[1].replace(/\D/g, '');
+      if (a.length === 2) a = '20' + a;
+      if (!isNaN(n) && a) return `${n}/${a}`;
+    }
+
+    const numDigits = cleanNum.replace(/\D/g, '');
+    if (numDigits) {
+      const anoStr = String(anoRaw || '').replace(/\D/g, '');
+      if (numDigits.length > 4) {
+        const possibleYear = numDigits.slice(-4);
+        if (possibleYear.startsWith('20')) {
+          const n = parseInt(numDigits.slice(0, -4), 10);
+          if (!isNaN(n)) return `${n}/${possibleYear}`;
+        }
+      }
+
+      const parsedN = parseInt(numDigits, 10);
+      if (!isNaN(parsedN)) {
+        return `${parsedN}/${anoStr || '2026'}`;
+      }
+    }
+
+    return cleanNum;
+  }
+
   const cleanPncp = String(numeroControlePncp || '').trim();
   if (cleanPncp) {
     const pncpMatch = cleanPncp.match(/-2-0*(\d+)\/(\d{4})/);
     if (pncpMatch) {
       return `${parseInt(pncpMatch[1], 10)}/${pncpMatch[2]}`;
     }
-  }
-
-  const cleanNum = String(numeroRaw || '').trim();
-  if (!cleanNum) return '';
-
-  const neMatch = cleanNum.match(/^(\d{4})NE(\d+)$/i);
-  if (neMatch) {
-    return `${neMatch[1]}NE${parseInt(neMatch[2], 10)}`;
-  }
-
-  if (cleanNum.includes('/')) {
-    const parts = cleanNum.split('/');
-    const n = parseInt(parts[0].replace(/\D/g, ''), 10);
-    let a = parts[1].replace(/\D/g, '');
-    if (a.length === 2) a = '20' + a;
-    if (!isNaN(n) && a) return `${n}/${a}`;
-  }
-
-  const numDigits = cleanNum.replace(/\D/g, '');
-  if (!numDigits) return cleanNum;
-
-  const anoStr = String(anoRaw || '').replace(/\D/g, '');
-  if (numDigits.length > 4) {
-    const possibleYear = numDigits.slice(-4);
-    if (possibleYear.startsWith('20')) {
-      const n = parseInt(numDigits.slice(0, -4), 10);
-      if (!isNaN(n)) return `${n}/${possibleYear}`;
+    const pncpDashMatch = cleanPncp.match(/-2-0*(\d+)-(\d{4})/);
+    if (pncpDashMatch) {
+      return `${parseInt(pncpDashMatch[1], 10)}/${pncpDashMatch[2]}`;
     }
   }
 
-  const parsedN = parseInt(numDigits, 10);
-  if (!isNaN(parsedN)) {
-    return `${parsedN}/${anoStr || '2026'}`;
-  }
-
-  return cleanNum;
+  return '';
 }
 
 /**
@@ -442,41 +730,31 @@ export function formatNumeroAnoContrato(numeroRaw: string, anoRaw?: string | num
 export async function fetchContratosGovData(
   uasg: string,
   numeroContrato: string,
-  anoContrato?: string | number,
-  additionalUasgs?: string[]
+  anoContrato?: string | number
 ): Promise<{ contratoId?: number; orgaoNome?: string; items: any[] }> {
   const numeroAno = formatNumeroAnoContrato(numeroContrato, anoContrato);
   if (!uasg || !numeroAno) return { items: [] };
 
-  const candidateUasgs = Array.from(new Set([
-    uasg,
-    ...(additionalUasgs || []),
-    '200331',
-    '200330'
-  ])).filter(Boolean);
+  try {
+    const listRes = await fetch(`/api-contratos-gov/api/contrato/ugorigem/${uasg}/numeroano/${numeroAno}`);
+    if (listRes.ok) {
+      const data = await listRes.json();
+      const cObj = Array.isArray(data) ? data[0] : data;
+      const contratoId = cObj?.id || cObj?.contrato_id;
+      const orgaoNome = cObj?.contratante?.orgao?.nome || cObj?.contratante?.orgao_origem?.nome;
 
-  for (const ug of candidateUasgs) {
-    try {
-      const listRes = await fetch(`/api-contratos-gov/api/contrato/ugorigem/${ug}/numeroano/${numeroAno}`);
-      if (listRes.ok) {
-        const data = await listRes.json();
-        const cObj = Array.isArray(data) ? data[0] : data;
-        const contratoId = cObj?.id || cObj?.contrato_id;
-        const orgaoNome = cObj?.contratante?.orgao?.nome || cObj?.contratante?.orgao_origem?.nome;
-
-        if (contratoId) {
-          const itemsRes = await fetch(`/api-contratos-gov/api/contrato/${contratoId}/itens`);
-          const itemsData = itemsRes.ok ? await itemsRes.json() : [];
-          return {
-            contratoId,
-            orgaoNome,
-            items: Array.isArray(itemsData) ? itemsData : []
-          };
-        }
+      if (contratoId) {
+        const itemsRes = await fetch(`/api-contratos-gov/api/contrato/${contratoId}/itens`);
+        const itemsData = itemsRes.ok ? await itemsRes.json() : [];
+        return {
+          contratoId,
+          orgaoNome,
+          items: Array.isArray(itemsData) ? itemsData : []
+        };
       }
-    } catch (e) {
-      console.warn(`Falha na consulta ao Contratos.gov.br (ug=${ug}, numAno=${numeroAno})`, e);
     }
+  } catch (e) {
+    console.warn(`Falha na consulta ao Contratos.gov.br (ug=${uasg}, numAno=${numeroAno})`, e);
   }
 
   return { items: [] };
@@ -818,7 +1096,7 @@ export async function fetchPncpContracts(
     let orgaoNomeGov: string | undefined = undefined;
 
     if (numContrato && resolvedUasg) {
-      const govData = await fetchContratosGovData(resolvedUasg, numContrato, anoContrato, ['200331', '200330', resolvedUasg]);
+      const govData = await fetchContratosGovData(resolvedUasg, numContrato, anoContrato);
       contratoId = govData.contratoId;
       orgaoNomeGov = govData.orgaoNome;
 
@@ -903,7 +1181,7 @@ export async function fetchPncpContracts(
       return null;
     }
 
-    const orgaoNome = isGerenciadora ? 'SECRETARIA NACIONAL DE SEGURANCA PUBLICA' : (orgaoNomeGov || c.nomeOrgao || detail?.orgaoEntidade?.razaoSocial || c.orgaoEntidade?.razaoSocial || detail?.unidadeOrgao?.nomeUnidade || c.unidadeExecutora?.nomeUnidade);
+    const orgaoNome = orgaoNomeGov || c.nomeOrgao || detail?.orgaoEntidade?.razaoSocial || c.orgaoEntidade?.razaoSocial || detail?.unidadeOrgao?.nomeUnidade || c.unidadeExecutora?.nomeUnidade;
     const unidadeNome = c.nomeUnidadeGestora || detail?.unidadeOrgao?.nomeUnidade || c.unidadeExecutora?.nomeUnidade;
 
     return {
@@ -932,7 +1210,35 @@ export async function fetchPncpContracts(
     };
   }));
 
-  return mapped.filter((c): c is PncpContract => c !== null);
+  const uniqueContractsMap = new Map<string, PncpContract>();
+  mapped.forEach((c) => {
+    if (!c) return;
+    const canKey = getCanonicalContractKey(c.numeroContrato, c.anoContrato, c.numeroControlePncp);
+    if (canKey) {
+      if (!uniqueContractsMap.has(canKey)) {
+        uniqueContractsMap.set(canKey, c);
+      } else {
+        const existing = uniqueContractsMap.get(canKey)!;
+        uniqueContractsMap.set(canKey, {
+          ...existing,
+          ...c,
+          contratoId: existing.contratoId || c.contratoId,
+          quantidadeContratada: existing.quantidadeContratada ?? c.quantidadeContratada,
+          valorUnitarioItem: existing.valorUnitarioItem ?? c.valorUnitarioItem,
+          valorTotalItem: existing.valorTotalItem ?? c.valorTotalItem,
+          linkVisualizacao: existing.linkVisualizacao || c.linkVisualizacao,
+          numeroControlePncp: existing.numeroControlePncp || c.numeroControlePncp
+        });
+      }
+    } else {
+      const fallbackKey = `${c.numeroContrato}-${c.anoContrato}-${c.uasg}`;
+      if (!uniqueContractsMap.has(fallbackKey)) {
+        uniqueContractsMap.set(fallbackKey, c);
+      }
+    }
+  });
+
+  return Array.from(uniqueContractsMap.values());
 }
 
 /**

@@ -304,9 +304,14 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
       
       if (itemEmpData && itemEmpData.empenhos.length > 0 && Object.keys(itemEmpData.links).length > 0) {
         let sumFromLinked = 0;
+        const seenEmpNos = new Set<string>();
         itemEmpData.empenhos.forEach((emp: any) => {
-          if (itemEmpData.links[emp.numeroEmpenho] === alloc.id) {
-            sumFromLinked += Number(emp.quantidadeEmpenhada || emp.quantidade || 0);
+          const empNo = emp.numeroEmpenho || emp.numero;
+          if (empNo && !seenEmpNos.has(empNo)) {
+            seenEmpNos.add(empNo);
+            if (itemEmpData.links[empNo] === alloc.id) {
+              sumFromLinked += Number(emp.quantidadeEmpenhada || emp.quantidade || 0);
+            }
           }
         });
         if (sumFromLinked > 0) {
