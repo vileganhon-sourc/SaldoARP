@@ -3,6 +3,7 @@ import type { DbAta } from './supabaseClient';
 import type { ArpRecord, ArpItemRecord, SyncMetadata } from '../types';
 
 import { formatPncpAtaUrl, formatPncpCompraUrl } from '../utils/pncpUtils';
+import { SUPPLEMENTAL_PNCP_ATAS } from './api';
 
 /**
  * Persiste registros de ARPs buscados das APIs governamentais no Supabase
@@ -128,7 +129,7 @@ export async function fetchArpsWithItemsFromDb(uasg?: string): Promise<{
         const key = `${d.numero_ata}-${d.codigo_uasg}`;
 
         if (d.itens_ata && Array.isArray(d.itens_ata) && d.itens_ata.length > 0) {
-          itemsByAta[key] = d.itens_ata.map((it: any) => ({
+          const mappedItems = d.itens_ata.map((it: any) => ({
             numeroAtaRegistroPreco: d.numero_ata,
             codigoUnidadeGerenciadora: d.codigo_uasg,
             numeroCompra: d.numero_compra || '',
@@ -165,12 +166,25 @@ export async function fetchArpsWithItemsFromDb(uasg?: string): Promise<{
             nomePdm: it.descricao_item || '',
             quantidadeEstimadaEdital: Number(it.quantidade_homologada) || 0
           } as ArpItemRecord));
+
+          const cleanNumAta = (d.numero_ata || '').replace(/^0+/, '');
+          const supp = SUPPLEMENTAL_PNCP_ATAS.find(s => s.numeroAta.replace(/^0+/, '') === cleanNumAta || s.numeroAta === d.numero_ata);
+          if (supp && supp.cnpjFornecedor) {
+            const cleanTargetCnpj = supp.cnpjFornecedor.replace(/\D/g, '');
+            itemsByAta[key] = mappedItems.filter((it: any) => (it.niFornecedor || '').replace(/\D/g, '') === cleanTargetCnpj);
+          } else {
+            itemsByAta[key] = mappedItems;
+          }
         }
+
+        const itemsCount = itemsByAta[key] ? itemsByAta[key].length : (d.itens_ata?.length || 0);
 
         return {
           numeroAtaRegistroPreco: d.numero_ata,
           codigoUnidadeGerenciadora: d.codigo_uasg,
           nomeUnidadeGerenciadora: d.nome_uasg || '',
+          linkAtaPNCP: formatPncpAtaUrl(null, d.numero_controle_pncp, d.numero_ata),
+          linkCompraPNCP: formatPncpCompraUrl(null, null, d.numero_controle_pncp),
           codigoOrgao: 0,
           nomeOrgao: d.nome_uasg || '',
           numeroCompra: d.numero_compra || '',
@@ -183,7 +197,7 @@ export async function fetchArpsWithItemsFromDb(uasg?: string): Promise<{
           valorTotal: Number(d.valor_total) || 0,
           statusAta: d.status_ata || 'Ata de Registro de Preços',
           objeto: d.objeto || '',
-          quantidadeItens: d.itens_ata?.length || 0,
+          quantidadeItens: itemsCount,
           dataHoraAtualizacao: d.data_hora_atualizacao_api || new Date().toISOString(),
           dataHoraInclusao: d.ultimo_sync_em || new Date().toISOString(),
           dataHoraExclusao: null,
