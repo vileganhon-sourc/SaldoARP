@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "vitest run",
+    "test:mutation": "vitest run src/services/__tests__/mutationCheck.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

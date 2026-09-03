@@ -105,10 +105,10 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   const loadItemsForArps = async (arpsList: ArpRecord[]) => {
     if (!arpsList || arpsList.length === 0) return;
 
-    // Apenas carregar itens sob demanda para as primeiras atas que ainda não possuam itens
-    const toFetch = arpsList.slice(0, 15).filter(arp => {
+    // Apenas carregar itens sob demanda para atas que ainda não possuam itens
+    const toFetch = arpsList.slice(0, 20).filter(arp => {
       const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
-      return itemsByAta[key] === undefined && !itemsLoadingByAta[key];
+      return (!itemsByAta[key] || itemsByAta[key].length === 0) && !itemsLoadingByAta[key];
     });
 
     if (toFetch.length === 0) return;
@@ -131,7 +131,8 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
             const res = await fetchArpItems(
               arp.dataVigenciaInicial,
               arp.codigoUnidadeGerenciadora,
-              arp.numeroAtaRegistroPreco
+              arp.numeroAtaRegistroPreco,
+              arp
             );
             setItemsByAta(prev => ({
               ...prev,

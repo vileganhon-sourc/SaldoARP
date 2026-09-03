@@ -396,20 +396,33 @@ export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<Ar
   return supplemental;
 }
 
+export function parsePncpControlNumber(ctrl?: string): { cnpj: string; seqCompra: number; anoCompra: string; seqAta: number } | null {
+  if (!ctrl) return null;
+  const match = ctrl.match(/^(\d{14})-1-(\d+)\/(\d{4})-(\d+)$/);
+  if (!match) return null;
+  return {
+    cnpj: match[1],
+    seqCompra: parseInt(match[2], 10),
+    anoCompra: match[3],
+    seqAta: parseInt(match[4], 10)
+  };
+}
+
 export async function fetchPncpCompraItems(
   anoCompra: string,
   seqCompra: number | string,
   numeroAta: string,
   uasg: string,
-  targetSupplierCnpj?: string
+  targetSupplierCnpj?: string,
+  customCnpj?: string
 ): Promise<ArpItemRecord[]> {
   const cleanTargetCnpj = (targetSupplierCnpj || '').replace(/\D/g, '');
-  const cacheKey = `${anoCompra}-${seqCompra}-${numeroAta}-${uasg}-${cleanTargetCnpj}`;
+  const cnpj = (customCnpj || '00394494000136').replace(/\D/g, '');
+  const cacheKey = `${cnpj}-${anoCompra}-${seqCompra}-${numeroAta}-${uasg}-${cleanTargetCnpj}`;
   if (pncpCompraItemsCache.has(cacheKey)) {
     return pncpCompraItemsCache.get(cacheKey)!;
   }
 
-  const cnpj = '00394494000136';
   try {
     const itemsUrl = `/api-pncp/api/pncp/v1/orgaos/${cnpj}/compras/${anoCompra}/${seqCompra}/itens`;
     const res = await fetch(itemsUrl);
@@ -501,12 +514,13 @@ const memoryItemsCache = new Map<string, ArpItemRecord[]>();
 
 /**
  * 2. Consultar ARP Item
- * Endereço: /modulo-arp/2_consultarARPItem
+ * Endereço: /modulo-arp/2_consultarARPItem com fallback dinâmico completo ao PNCP
  */
 export async function fetchArpItems(
   dataVigenciaInicial: string,
   codigoUnidadeGerenciadora: string,
-  numeroAtaRegistroPreco: string
+  numeroAtaRegistroPreco: string,
+  arpContext?: Partial<ArpRecord> | string
 ): Promise<ArpItemsResponse> {
   const cacheKey = `${numeroAtaRegistroPreco}-${codigoUnidadeGerenciadora}`;
   if (memoryItemsCache.has(cacheKey)) {
@@ -540,7 +554,7 @@ export async function fetchArpItems(
   };
 
   try {
-    // 1. Tenta com a data exata informada
+    // 1. Tenta com a data exata informada no Compras.gov
     let data: ArpItemsResponse | null = null;
     if (cleanDate) {
       data = await executeQuery(cleanDate, cleanDate);
@@ -550,7 +564,7 @@ export async function fetchArpItems(
       matchAtaNumber(item.numeroAtaRegistroPreco, numeroAtaRegistroPreco)
     );
 
-    // 2. Se não encontrou pelo dia exato (devido a divergência cadastral entre endpoints da API), busca no ano da Ata
+    // 2. Se não encontrou pelo dia exato, busca no ano da Ata no Compras.gov
     if (foundItems.length === 0 && ataYear) {
       const yearData = await executeQuery(`${ataYear}-01-01`, `${ataYear}-12-31`);
       if (yearData?.resultado) {
@@ -560,15 +574,53 @@ export async function fetchArpItems(
       }
     }
 
-    // 3. Se não encontrou no Compras.gov, busca diretamente na compra do PNCP (Atas cadastradas via Contratos.gov.br)
+    // 3. Se não encontrou no Compras.gov, realiza fallback dinâmico para a compra do PNCP
     if (foundItems.length === 0) {
-      const cleanTargetAta = numeroAtaRegistroPreco.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
-      const supp = SUPPLEMENTAL_PNCP_ATAS.find(s => {
-        const sNum = s.numeroAta.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
-        return sNum === cleanTargetAta;
-      });
-      if (supp) {
-        foundItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, numeroAtaRegistroPreco, codigoUnidadeGerenciadora, supp.cnpjFornecedor);
+      // 3.1. Verifica se foi passado o contexto com número de controle PNCP ou ano/número da compra
+      let pncpCtrl = typeof arpContext === 'string' ? arpContext : arpContext?.numeroControlePncpAta;
+      let anoCompra = typeof arpContext === 'object' ? arpContext?.anoCompra : undefined;
+      let seqCompra = typeof arpContext === 'object' ? (arpContext?.numeroCompra ? parseInt(arpContext.numeroCompra, 10) : undefined) : undefined;
+      let cnpjFornecedor: string | undefined;
+
+      // 3.2. Se não veio no contexto, verifica no cache da memória das atas
+      if (!pncpCtrl && !seqCompra) {
+        for (const list of arpsMemoryCache.values()) {
+          const matchArp = list.find(a => matchAtaNumber(a.numeroAtaRegistroPreco, numeroAtaRegistroPreco));
+          if (matchArp) {
+            pncpCtrl = matchArp.numeroControlePncpAta;
+            anoCompra = matchArp.anoCompra;
+            seqCompra = matchArp.numeroCompra ? parseInt(matchArp.numeroCompra, 10) : undefined;
+            break;
+          }
+        }
+      }
+
+      // 3.3. Se temos o controle PNCP, decompõe os identificadores
+      if (pncpCtrl) {
+        const parsed = parsePncpControlNumber(pncpCtrl);
+        if (parsed) {
+          anoCompra = parsed.anoCompra;
+          seqCompra = parsed.seqCompra;
+        }
+      }
+
+      // 3.4. Se ainda não temos a compra, verifica na lista de suplementares pré-mapeadas
+      if (!seqCompra || !anoCompra) {
+        const cleanTargetAta = numeroAtaRegistroPreco.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
+        const supp = SUPPLEMENTAL_PNCP_ATAS.find(s => {
+          const sNum = s.numeroAta.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
+          return sNum === cleanTargetAta;
+        });
+        if (supp) {
+          anoCompra = supp.anoCompra;
+          seqCompra = supp.seqCompra;
+          cnpjFornecedor = supp.cnpjFornecedor;
+        }
+      }
+
+      // 3.5. Busca itens na API do PNCP se possuir ano e sequência da compra
+      if (anoCompra && seqCompra) {
+        foundItems = await fetchPncpCompraItems(anoCompra, seqCompra, numeroAtaRegistroPreco, codigoUnidadeGerenciadora, cnpjFornecedor);
       }
     }
 

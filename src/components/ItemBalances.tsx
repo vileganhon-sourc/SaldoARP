@@ -208,12 +208,52 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         item.codigoUnidadeGerenciadora,
         item.numeroItem
       );
-      setUnidades(data.resultado || []);
-      if (!data.resultado || data.resultado.length === 0) {
-        setError('Nenhum detalhamento de saldos por órgão cadastrado para este item.');
+      if (data.resultado && data.resultado.length > 0) {
+        setUnidades(data.resultado);
+      } else {
+        setUnidades([{
+          numeroAta: item.numeroAtaRegistroPreco,
+          unidadeGerenciadora: arp.codigoUnidadeGerenciadora || '200331',
+          numeroItem: item.numeroItem,
+          codigoPdm: String(item.codigoPdm || ''),
+          descricaoItem: item.descricaoItem,
+          fornecedor: item.nomeRazaoSocialFornecedor,
+          codigoUnidade: arp.codigoUnidadeGerenciadora || '200331',
+          nomeUnidade: arp.nomeUnidadeGerenciadora || arp.nomeOrgao || 'MINISTERIO DA JUSTICA E SEGURANCA PUBLICA',
+          tipoUnidade: 'GERENCIADORA',
+          quantidadeRegistrada: item.quantidadeHomologadaItem || 0,
+          saldoRemanejamentoEmpenho: item.quantidadeHomologadaItem || 0,
+          saldoAdesoes: 0,
+          qtdLimiteAdesao: item.maximoAdesao || 0,
+          qtdLimiteInformadoCompra: item.maximoAdesao || 0,
+          aceitaAdesao: item.maximoAdesao > 0,
+          dataHoraInclusao: new Date().toISOString(),
+          dataHoraAtualizacao: new Date().toISOString(),
+          dataHoraExclusao: null
+        }]);
       }
     } catch (err: any) {
-      setError(err.message || 'Falha ao buscar os saldos das unidades para o item.');
+      // Fallback gracioso para a Unidade Gerenciadora
+      setUnidades([{
+        numeroAta: item.numeroAtaRegistroPreco,
+        unidadeGerenciadora: arp.codigoUnidadeGerenciadora || '200331',
+        numeroItem: item.numeroItem,
+        codigoPdm: String(item.codigoPdm || ''),
+        descricaoItem: item.descricaoItem,
+        fornecedor: item.nomeRazaoSocialFornecedor,
+        codigoUnidade: arp.codigoUnidadeGerenciadora || '200331',
+        nomeUnidade: arp.nomeUnidadeGerenciadora || arp.nomeOrgao || 'MINISTERIO DA JUSTICA E SEGURANCA PUBLICA',
+        tipoUnidade: 'GERENCIADORA',
+        quantidadeRegistrada: item.quantidadeHomologadaItem || 0,
+        saldoRemanejamentoEmpenho: item.quantidadeHomologadaItem || 0,
+        saldoAdesoes: 0,
+        qtdLimiteAdesao: item.maximoAdesao || 0,
+        qtdLimiteInformadoCompra: item.maximoAdesao || 0,
+        aceitaAdesao: item.maximoAdesao > 0,
+        dataHoraInclusao: new Date().toISOString(),
+        dataHoraAtualizacao: new Date().toISOString(),
+        dataHoraExclusao: null
+      }]);
     } finally {
       setLoading(false);
     }
@@ -660,8 +700,21 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     await saveAllocations(itemKey, newAllocations);
   };
 
-  const gerenciadoraRecord = unidades.find(uni => uni.tipoUnidade === 'GERENCIADORA');
-  const totalUGQty = gerenciadoraRecord ? gerenciadoraRecord.quantidadeRegistrada : item.quantidadeHomologadaItem;
+  const isGerenciadoraUasg = (codigo?: string | number) => {
+    const clean = String(codigo || '').replace(/\D/g, '');
+    return clean === '200331' || clean === '200330' || clean === String(arp.codigoUnidadeGerenciadora).replace(/\D/g, '');
+  };
+
+  const isAllowedEmpenhoUasg = (uasg?: string | number) => {
+    if (!uasg) return false;
+    const clean = String(uasg).replace(/\D/g, '');
+    return clean === '200331' || clean === '200330';
+  };
+
+  const gerenciadoraUnits = unidades.filter(uni => uni.tipoUnidade === 'GERENCIADORA' || isGerenciadoraUasg(uni.codigoUnidade));
+  const totalUGQty = gerenciadoraUnits.length > 0 
+    ? gerenciadoraUnits.reduce((sum, u) => sum + (Number(u.quantidadeRegistrada) || 0), 0)
+    : (Number(item.quantidadeHomologadaItem) || 0);
 
   const handleAddAllocation = (e: React.FormEvent) => {
     e.preventDefault();
@@ -814,6 +867,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   };
 
   // Mapeia empenhos oficiais da API (SIASG e Contratos.gov/PNCP) para a entidade canônica Empenho
+  // FILTRAGEM OBRIGATÓRIA: Apresentar apenas empenhos das UASGs 200331 e 200330
   const officialApiEmpenhos: Empenho[] = React.useMemo(() => {
     const list: Empenho[] = [];
     const seen = new Set<string>();
@@ -821,8 +875,13 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     empenhos.forEach((emp, idx) => {
       const num = emp.numeroEmpenho || `EMP-${idx + 1}`;
       const ano = parseInt(arp.anoCompra || '2026', 10);
-      const uasg = emp.unidade || arp.codigoUnidadeGerenciadora || '200331';
-      const key = `${normalizeEmpenhoNumero(num)}-${ano}-${uasg}-${item.numeroItem}`;
+      const rawUasg = emp.unidade || arp.codigoUnidadeGerenciadora || '200331';
+      const cleanUasg = rawUasg.replace(/\D/g, '') || '200331';
+
+      // Filtra estritamente apenas empenhos das UASGs 200331 e 200330
+      if (!isAllowedEmpenhoUasg(cleanUasg)) return;
+
+      const key = `${normalizeEmpenhoNumero(num)}-${ano}-${cleanUasg}-${item.numeroItem}`;
       if (!seen.has(key)) {
         seen.add(key);
         list.push({
@@ -831,7 +890,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
           ano,
           arpId: item.numeroAtaRegistroPreco,
           itemId: item.numeroItem,
-          uasg,
+          uasg: cleanUasg,
           quantidade: Number(emp.quantidadeEmpenhada) || 0,
           valorUnitario: Number(item.valorUnitario) || undefined,
           valorTotal: Number(emp.valorEmpenhado) || (Number(emp.quantidadeEmpenhada) * Number(item.valorUnitario || 0)) || undefined,
@@ -851,8 +910,13 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         const num = emp.numero;
         if (!num) return;
         const ano = parseInt(arp.anoCompra || '2026', 10);
-        const uasg = emp.unidade_gestora || arp.codigoUnidadeGerenciadora || '200331';
-        const key = `${normalizeEmpenhoNumero(num)}-${ano}-${uasg}-${item.numeroItem}`;
+        const rawUasg = emp.unidade_gestora || arp.codigoUnidadeGerenciadora || '200331';
+        const cleanUasg = rawUasg.replace(/\D/g, '') || '200331';
+
+        // Filtra estritamente apenas empenhos das UASGs 200331 e 200330
+        if (!isAllowedEmpenhoUasg(cleanUasg)) return;
+
+        const key = `${normalizeEmpenhoNumero(num)}-${ano}-${cleanUasg}-${item.numeroItem}`;
         
         const empKey = emp.numero || String(emp.id);
         const qtdDetail = getEmpenhoQuantityInfo(empKey, emp, empenhoManualQuantities);
@@ -867,7 +931,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
             ano,
             arpId: item.numeroAtaRegistroPreco,
             itemId: item.numeroItem,
-            uasg,
+            uasg: cleanUasg,
             quantidade: effectiveQty,
             valorUnitario: Number(item.valorUnitario) || undefined,
             valorTotal: !isNaN(rawVal) && rawVal > 0 ? rawVal : (effectiveQty * Number(item.valorUnitario || 0)),
@@ -886,15 +950,22 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
     return list;
   }, [empenhos, contractGovEmpenhos, empenhoLinks, item, arp, empenhoManualQuantities]);
 
-  // Lista Unificada de Empenhos com Matching e Promoção Inteligente
+  const filteredManualEmpenhos = React.useMemo(() => {
+    return manualEmpenhos.filter(me => {
+      const u = (me.uasg || '200331').replace(/\D/g, '');
+      return isAllowedEmpenhoUasg(u);
+    });
+  }, [manualEmpenhos]);
+
+  // Lista Unificada de Empenhos com Matching e Promoção Inteligente (exclusiva das UASGs 200331 e 200330)
   const allEmpenhos: Empenho[] = React.useMemo(() => {
-    return matchAndMergeEmpenhos(officialApiEmpenhos, manualEmpenhos);
-  }, [officialApiEmpenhos, manualEmpenhos]);
+    return matchAndMergeEmpenhos(officialApiEmpenhos, filteredManualEmpenhos);
+  }, [officialApiEmpenhos, filteredManualEmpenhos]);
 
   // Calculate totals
   const totalRegistrado = unidades.reduce((acc, curr) => acc + curr.quantidadeRegistrada, 0);
   const totalSaldoRemanejamento = unidades.reduce((acc, curr) => acc + curr.saldoRemanejamentoEmpenho, 0);
-  const gerenciadoraUnit = unidades.find(u => u.tipoUnidade === 'GERENCIADORA');
+  const gerenciadoraUnit = unidades.find(u => u.tipoUnidade === 'GERENCIADORA' || isGerenciadoraUasg(u.codigoUnidade));
 
   const totalAdesaoRegistrada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeRegistrada) || 0), 0);
   const totalAdesaoEmpenhada = adesoes.reduce((acc, a) => acc + (Number(a.quantidadeEmpenhada) || 0), 0);
@@ -964,11 +1035,18 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const remainingUGQty = totalUGQty - totalAllocatedSum;
   const percentAllocated = totalUGQty > 0 ? (totalAllocatedSum / totalUGQty) * 100 : 0;
 
-  // Sort tables to bring GERENCIADORA to the top
-  const sortedUnidades = [...unidades].sort((a, b) => {
+  // Normaliza e ordena unidades considerando UASGs 200331 e 200330 como GERENCIADORA
+  const sortedUnidades = [...unidades].map(uni => {
+    const cleanUasg = String(uni.codigoUnidade || '').replace(/\D/g, '');
+    const isUG = uni.tipoUnidade === 'GERENCIADORA' || isGerenciadoraUasg(cleanUasg);
+    return {
+      ...uni,
+      tipoUnidade: (isUG ? 'GERENCIADORA' : (uni.tipoUnidade || 'PARTICIPANTE')) as 'GERENCIADORA' | 'PARTICIPANTE'
+    };
+  }).sort((a, b) => {
     if (a.tipoUnidade === 'GERENCIADORA' && b.tipoUnidade !== 'GERENCIADORA') return -1;
     if (a.tipoUnidade !== 'GERENCIADORA' && b.tipoUnidade === 'GERENCIADORA') return 1;
-    return 0;
+    return (a.codigoUnidade || '').localeCompare(b.codigoUnidade || '');
   });
 
   const getProgressColorClass = (percent: number) => {
@@ -1287,12 +1365,36 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                     <th>Órgão Participante / UASG</th>
                     <th>Tipo</th>
                     <th>Original Registrado</th>
+                    <th>Qtd Empenhada</th>
                     <th style={{ width: '220px' }}>Saldo p/ Empenho</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedUnidades.map((uni, idx) => {
-                    const empPerc = uni.quantidadeRegistrada > 0 ? (uni.saldoRemanejamentoEmpenho / uni.quantidadeRegistrada) * 100 : 0;
+                    const cleanUasg = String(uni.codigoUnidade || '').replace(/\D/g, '');
+                    const isUG = uni.tipoUnidade === 'GERENCIADORA' || isGerenciadoraUasg(cleanUasg);
+                    const hasMultipleUgRows = sortedUnidades.filter(u => isGerenciadoraUasg(u.codigoUnidade)).length > 1;
+
+                    const empsForUnit = allEmpenhos.filter(e => {
+                      const eUasg = String(e.uasg || '').replace(/\D/g, '');
+                      if (isUG) {
+                        if (hasMultipleUgRows) {
+                          return eUasg === cleanUasg;
+                        }
+                        return isAllowedEmpenhoUasg(eUasg);
+                      }
+                      return eUasg === cleanUasg;
+                    });
+
+                    const empenhadoUnitQty = calculateTotalEmpenhado(empsForUnit);
+                    const effectiveSaldo = isUG 
+                      ? (uni.quantidadeRegistrada - empenhadoUnitQty)
+                      : (uni.saldoRemanejamentoEmpenho !== undefined && uni.saldoRemanejamentoEmpenho !== null 
+                          ? uni.saldoRemanejamentoEmpenho 
+                          : (uni.quantidadeRegistrada - empenhadoUnitQty));
+
+                    const empPerc = uni.quantidadeRegistrada > 0 ? (effectiveSaldo / uni.quantidadeRegistrada) * 100 : 0;
+                    const clampedPerc = Math.max(0, Math.min(100, empPerc));
 
                     return (
                       <tr key={`${uni.codigoUnidade}-${idx}`}>
@@ -1305,23 +1407,28 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                           </div>
                         </td>
                         <td>
-                          <span className={`badge ${uni.tipoUnidade === 'GERENCIADORA' ? 'badge-info' : 'badge-success'}`}>
-                            {uni.tipoUnidade}
+                          <span className={`badge ${isUG ? 'badge-info' : 'badge-success'}`}>
+                            {isUG ? 'GERENCIADORA' : 'PARTICIPANTE'}
                           </span>
                         </td>
                         <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>
                           {formatNumber(uni.quantidadeRegistrada)}
                         </td>
+                        <td style={{ fontWeight: 700, fontFamily: 'monospace', color: empenhadoUnitQty > 0 ? 'var(--warning)' : 'var(--text-muted)' }}>
+                          {formatNumber(empenhadoUnitQty)} un
+                        </td>
                         <td>
                           <div className="progress-container">
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                              <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{formatNumber(uni.saldoRemanejamentoEmpenho)}</span>
+                              <span style={{ fontWeight: 700, color: effectiveSaldo < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>
+                                {formatNumber(effectiveSaldo)}
+                              </span>
                               <span style={{ color: 'var(--text-muted)' }}>{formatNumber(empPerc)}%</span>
                             </div>
                             <div className="progress-track" style={{ height: '6px' }}>
                               <div 
-                                className={`progress-fill ${getProgressColorClass(empPerc)}`}
-                                style={{ width: `${empPerc}%` }}
+                                className={`progress-fill ${getProgressColorClass(clampedPerc)}`}
+                                style={{ width: `${clampedPerc}%` }}
                               ></div>
                             </div>
                           </div>

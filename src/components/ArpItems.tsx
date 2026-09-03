@@ -43,7 +43,8 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
       const data = await fetchArpItems(
         workingArp.dataVigenciaInicial,
         workingArp.codigoUnidadeGerenciadora,
-        workingArp.numeroAtaRegistroPreco
+        workingArp.numeroAtaRegistroPreco,
+        workingArp
       );
       
       let filtered = data.resultado || [];
