@@ -18,8 +18,8 @@ import {
   Printer,
   Trash2
 } from 'lucide-react';
-import { fetchAllAllocationsGlobal, fetchEmpenhoLinks, clearAllAllocations, type GlobalAllocationRecord } from '../services/allocationService';
-import { fetchArps, fetchArpItems, fetchEmpenhosSaldoItem } from '../services/api';
+import { fetchAllAllocationsGlobal, fetchEmpenhoLinks, fetchManualEmpenhos, clearAllAllocations, type GlobalAllocationRecord } from '../services/allocationService';
+import { fetchArps, fetchArpItems, fetchEmpenhosSaldoItem, fetchPncpContracts, fetchContratosGovEmpenhos } from '../services/api';
 import { fetchArpsFromDb } from '../services/dbCacheService';
 import { ManageDepartmentsModal } from './ManageDepartmentsModal';
 import type { ArpRecord, ArpItemRecord } from '../types';
@@ -205,11 +205,46 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
             loadedItemsMap[ataKey] = loadedItems;
             loadedItemsMap[`${numeroAta}`] = loadedItems;
 
-            // Busca todos os empenhos da Ata
+            // Busca todos os empenhos da Ata (SIASG e Contratos.gov/PNCP)
             let ataEmpenhos: any[] = [];
             try {
               const empRes = await fetchEmpenhosSaldoItem(numeroAta, uasg);
               ataEmpenhos = empRes.resultado || [];
+            } catch {}
+
+            let govEmpenhosList: any[] = [];
+            try {
+              const cnpj = (uasg === '200331' || uasg === '200330') ? '00394494000136' : '';
+              const contracts = await fetchPncpContracts(cnpj, String(ataYear), foundArp?.numeroCompra || '1', '', '', {
+                codigoOrgao: foundArp?.codigoOrgao,
+                codigoUnidadeGestora: uasg,
+                idCompra: foundArp?.idCompra,
+                numeroCompra: foundArp?.numeroCompra,
+                anoCompra: foundArp?.anoCompra
+              });
+
+              for (const c of contracts) {
+                if (c.contratoId) {
+                  try {
+                    const rawGovEmps = await fetchContratosGovEmpenhos(c.contratoId);
+                    if (rawGovEmps && rawGovEmps.length > 0) {
+                      rawGovEmps.forEach((ge: any) => {
+                        const rawVal = typeof ge.empenhado === 'number' ? ge.empenhado : parseFloat(String(ge.empenhado || '0').replace(/\./g, '').replace(',', '.'));
+                        govEmpenhosList.push({
+                          numeroEmpenho: ge.numero,
+                          numero: ge.numero,
+                          quantidadeEmpenhada: ge.quantidadeFisicaOriginal || 0,
+                          quantidade: ge.quantidadeFisicaOriginal || 0,
+                          valorEmpenhado: !isNaN(rawVal) && rawVal > 0 ? rawVal : 0,
+                          valorTotal: !isNaN(rawVal) && rawVal > 0 ? rawVal : 0,
+                          fornecedor: ge.credor,
+                          uasg: ge.unidade_gestora || uasg
+                        });
+                      });
+                    }
+                  } catch {}
+                }
+              }
             } catch {}
 
             // Para cada item da Ata, consulta links de empenhos e filtra empenhos do item
@@ -219,10 +254,25 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
                 const paddedItmNum = (itm.numeroItem || '1').toString().padStart(5, '0');
                 const itemKey = `${numeroAta}-${uasg}-${itm.numeroItem}`;
                 const links = await fetchEmpenhoLinks(itemKey);
+                let manualEmps: any[] = [];
+                try {
+                  manualEmps = await fetchManualEmpenhos(itemKey);
+                } catch {}
                 
-                const itemEmpenhos = ataEmpenhos.filter(e => 
-                  parseInt(e.numeroItem || '1', 10).toString() === cleanItmNum
-                );
+                const itemEmpenhos = [
+                  ...ataEmpenhos.filter(e => parseInt(e.numeroItem || '1', 10).toString() === cleanItmNum),
+                  ...manualEmps.map(me => ({
+                    numeroEmpenho: me.numero,
+                    numero: me.numero,
+                    quantidadeEmpenhada: me.quantidade,
+                    quantidade: me.quantidade,
+                    valorEmpenhado: me.valorTotal || (me.quantidade * (me.valorUnitario || itm.valorUnitario || 0)),
+                    valorTotal: me.valorTotal || (me.quantidade * (me.valorUnitario || itm.valorUnitario || 0)),
+                    fornecedor: me.fornecedor,
+                    uasg: me.uasg
+                  })),
+                  ...govEmpenhosList
+                ];
 
                 loadedEmpenhosMap[itemKey] = { links, empenhos: itemEmpenhos };
                 loadedEmpenhosMap[`${numeroAta}-${uasg}-${cleanItmNum}`] = { links, empenhos: itemEmpenhos };
@@ -297,33 +347,39 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
 
       const unitPrice = item?.valorUnitario || 0;
 
-      // Calcula a quantidade empenhada real a partir dos links de empenho daquele item
-      let calculatedEmpenhadaQty = alloc.empenhadaQty || 0;
+      // Calcula a quantidade e o valor empenhados reais a partir dos links de empenho daquele item
+      let calculatedEmpenhadaQty = 0;
+      let calculatedEmpenhadaValue = 0;
       const itemEmpData = empenhosByItem[alloc.itemKey] || 
                           empenhosByItem[`${numeroAta}-${uasg}-${cleanItemNum}`] ||
                           empenhosByItem[`${numeroAta}-${uasg}-${paddedItemNum}`];
       
-      if (itemEmpData && itemEmpData.empenhos.length > 0 && Object.keys(itemEmpData.links).length > 0) {
-        let sumFromLinked = 0;
+      if (itemEmpData && itemEmpData.empenhos && itemEmpData.empenhos.length > 0 && itemEmpData.links && Object.keys(itemEmpData.links).length > 0) {
         const seenEmpNos = new Set<string>();
         itemEmpData.empenhos.forEach((emp: any) => {
           const empNo = emp.numeroEmpenho || emp.numero;
           if (empNo && !seenEmpNos.has(empNo)) {
-            seenEmpNos.add(empNo);
-            if (itemEmpData.links[empNo] === alloc.id) {
-              sumFromLinked += Number(emp.quantidadeEmpenhada || emp.quantidade || 0);
+            if (itemEmpData.links[empNo] === alloc.id || emp.unidadeInternaId === alloc.id) {
+              seenEmpNos.add(empNo);
+              const q = Number(emp.quantidadeEmpenhada || emp.quantidade || 0);
+              const v = Number(emp.valorEmpenhado || emp.valorTotal || 0);
+              calculatedEmpenhadaQty += q;
+              calculatedEmpenhadaValue += v > 0 ? v : (q * (emp.valorUnitario || unitPrice));
             }
           }
         });
-        if (sumFromLinked > 0) {
-          calculatedEmpenhadaQty = sumFromLinked;
-        }
+      }
+
+      // Fallback para alloc.empenhadaQty se não houver empenhos específicos vinculados
+      if (calculatedEmpenhadaQty === 0 && alloc.empenhadaQty && alloc.empenhadaQty > 0) {
+        calculatedEmpenhadaQty = alloc.empenhadaQty;
+        calculatedEmpenhadaValue = alloc.empenhadaQty * unitPrice;
       }
 
       const saldoQty = Math.max(0, alloc.allocatedQty - calculatedEmpenhadaQty);
-      const allocatedValue = alloc.allocatedQty * unitPrice;
-      const empenhadaValue = calculatedEmpenhadaQty * unitPrice;
       const saldoValue = saldoQty * unitPrice;
+      const empenhadaValue = calculatedEmpenhadaValue;
+      const allocatedValue = empenhadaValue + saldoValue;
 
       const vigenciaFinalDate = arp?.dataVigenciaFinal ? new Date(arp.dataVigenciaFinal) : undefined;
       const isExpired = vigenciaFinalDate ? vigenciaFinalDate < today : false;
