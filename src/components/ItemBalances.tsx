@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, ExternalLink, ChevronRight, ChevronDown, Check, X, Share2 } from 'lucide-react';
+import { ChevronLeft, Building2, HelpCircle, ArrowRightLeft, Users, DollarSign, Plus, Edit2, Trash2, ExternalLink, ChevronRight, ChevronDown, Check, X, Share2, RotateCcw } from 'lucide-react';
 import { fetchUnidadesItem, fetchEmpenhosSaldoItem, fetchPncpContracts, fetchPncpContractEmpenhos, fetchAdesoesItem, fetchContratosGovEmpenhos, fetchContratoEmpenhoDetalhe, fetchContratosGovData, getCanonicalContractKey } from '../services/api';
-import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks, fetchEmpenhoManualQuantities, fetchManualEmpenhos, saveManualEmpenhos, fetchManualContratos, saveManualContratos, fetchContratoEmpenhoLinks, saveContratoEmpenhoLinks } from '../services/allocationService';
-import { calculateTotalEmpenhado, reconcileBalances, matchAndMergeEmpenhos, normalizeEmpenhoNumero, calculateAllocationsWithEmpenhos, calculateItemCardMetrics } from '../services/balanceService';
+import { fetchAllocations, saveAllocations, fetchEmpenhoLinks, saveEmpenhoLinks, fetchEmpenhoManualQuantities, saveEmpenhoManualQuantities, removeEmpenhoManualQuantity, fetchManualEmpenhos, saveManualEmpenhos, fetchManualContratos, saveManualContratos, fetchContratoEmpenhoLinks, saveContratoEmpenhoLinks } from '../services/allocationService';
+import { calculateTotalEmpenhado, reconcileBalances, matchAndMergeEmpenhos, normalizeEmpenhoNumero, calculateAllocationsWithEmpenhos, calculateItemCardMetrics, deduceEmpenhoQuantity } from '../services/balanceService';
 import { cacheArpsInDb, cacheArpItemsInDb } from '../services/dbCacheService';
 import { fetchDepartments, type InternalDepartment } from '../services/unitService';
 import { ManageDepartmentsModal } from './ManageDepartmentsModal';
 import { ManualEmpenhoModal } from './modals/ManualEmpenhoModal';
 import { ManualContratoModal } from './modals/ManualContratoModal';
 import { ItemReconciliationCard } from './ItemReconciliationCard';
-import { formatPncpContractUrl } from '../utils/pncpUtils';
+import { formatPncpContractUrl, formatPncpAtaUrl, formatPncpCompraUrl } from '../utils/pncpUtils';
 import type { ArpRecord, ArpItemRecord, UnidadeItemRecord, EmpenhoSaldoItemRecord, InternalAllocation, PncpContract, PncpContractEmpenho, AdesaoItemRecord, ContratosGovEmpenhoRecord, Empenho, Contrato, ContratoEmpenho, ReconciliationReport } from '../types';
 
 interface ItemBalancesProps {
@@ -42,7 +42,6 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
 
   const [allocations, setAllocations] = useState<InternalAllocation[]>([]);
   const [empenhoLinks, setEmpenhoLinks] = useState<Record<string, string>>({});
-  const [empenhoManualQuantities, setEmpenhoManualQuantities] = useState<Record<string, number>>({});
   const [newUnitName, setNewUnitName] = useState<string>('');
   const [newAllocatedQty, setNewAllocatedQty] = useState<number | ''>('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -53,6 +52,9 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const [manualEmpenhos, setManualEmpenhos] = useState<Empenho[]>([]);
   const [manualContratos, setManualContratos] = useState<Contrato[]>([]);
   const [contratoEmpenhoLinks, setContratoEmpenhoLinks] = useState<ContratoEmpenho[]>([]);
+  const [empenhoManualQuantities, setEmpenhoManualQuantities] = useState<Record<string, number>>({});
+  const [editingEmpenhoKey, setEditingEmpenhoKey] = useState<string | null>(null);
+  const [editingEmpenhoQty, setEditingEmpenhoQty] = useState<string>('');
   const [isManualEmpenhoModalOpen, setIsManualEmpenhoModalOpen] = useState<boolean>(false);
   const [isManualContratoModalOpen, setIsManualContratoModalOpen] = useState<boolean>(false);
   const [editingManualEmpenho, setEditingManualEmpenho] = useState<Empenho | null>(null);
@@ -65,8 +67,35 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
       setManualContratos(ctrs);
       const links = await fetchContratoEmpenhoLinks(itemKey);
       setContratoEmpenhoLinks(links);
+      const manualQtds = await fetchEmpenhoManualQuantities(itemKey);
+      setEmpenhoManualQuantities(manualQtds);
     } catch (e) {
       console.warn('Erro ao carregar dados manuais:', e);
+    }
+  };
+
+  const handleStartEditEmpenhoQty = (empKey: string, currentQty: number) => {
+    setEditingEmpenhoKey(empKey);
+    setEditingEmpenhoQty(String(currentQty ?? 0));
+  };
+
+  const handleSaveEmpenhoQty = async (empKey: string) => {
+    const parsed = parseFloat(editingEmpenhoQty);
+    if (isNaN(parsed) || parsed < 0) {
+      alert('Por favor, informe uma quantidade válida maior ou igual a 0.');
+      return;
+    }
+    const updated = { ...empenhoManualQuantities, [empKey]: parsed };
+    setEmpenhoManualQuantities(updated);
+    await saveEmpenhoManualQuantities(itemKey, updated);
+    setEditingEmpenhoKey(null);
+  };
+
+  const handleRestoreEmpenhoQty = async (empKey: string) => {
+    const updated = await removeEmpenhoManualQuantity(itemKey, empKey);
+    setEmpenhoManualQuantities(updated);
+    if (editingEmpenhoKey === empKey) {
+      setEditingEmpenhoKey(null);
     }
   };
 
@@ -348,9 +377,10 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const enrichGovEmpenhosWithDetails = async (
     govEmps: ContratosGovEmpenhoRecord[],
     _contratoId?: number,
-    _contratoObj?: PncpContract
+    contratoObj?: PncpContract
   ): Promise<ContratosGovEmpenhoRecord[]> => {
     const targetItemNum = parseInt(item.numeroItem, 10);
+    const unitPrice = contratoObj?.valorUnitarioItem ?? item.valorUnitario;
 
     const enriched = await Promise.all(
       govEmps.map(async (emp) => {
@@ -358,7 +388,7 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
         let quantidadeFisica: number | undefined = undefined;
         let itensMinuta: any[] | undefined = undefined;
 
-        // Fonte Única Oficial: Consulta a minuta individual do empenho (/consultar/{id})
+        // Fonte Única Oficial Direta: Consulta a minuta individual do empenho (/consultar/{id})
         if (emp.id) {
           try {
             const detalhe = await fetchContratoEmpenhoDetalhe(emp.id);
@@ -374,10 +404,32 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
           }
         }
 
+        // Fonte Oficial Deduzida: Se a minuta não está disponível, calcula determinística e temporalmente
+        let quantidadeDeduzida: number | undefined = undefined;
+        let isDeduzido = false;
+        let isReforco = false;
+
+        if (quantidadeFisica === undefined && unitPrice && emp.empenhado) {
+          const deduction = deduceEmpenhoQuantity(
+            emp.empenhado,
+            unitPrice,
+            emp.data_emissao,
+            contratoObj?.historicoPrecos
+          );
+          if (deduction.quantidade > 0 || deduction.isReforco) {
+            quantidadeDeduzida = deduction.quantidade;
+            isDeduzido = true;
+            isReforco = deduction.isReforco;
+          }
+        }
+
         return {
           ...emp,
           itens_minuta: itensMinuta,
-          quantidadeFisicaOriginal: quantidadeFisica
+          quantidadeFisicaOriginal: quantidadeFisica,
+          quantidadeDeduzida,
+          isDeduzido,
+          isReforco
         };
       })
     );
@@ -387,24 +439,38 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   const getEmpenhoQuantityInfo = (
     empKey: string, 
     emp?: ContratosGovEmpenhoRecord,
-    manualQtdsMap: Record<string, number> = empenhoManualQuantities
-  ): { qty: number; isManual: boolean; isOfficial: boolean } => {
+    manualQtdsMap: Record<string, number> = empenhoManualQuantities,
+    contratoObj?: PncpContract
+  ): { qty: number; isManual: boolean; isOfficial: boolean; isDeduzido?: boolean; isReforco?: boolean } => {
     // Prioridade 1: Quantidade Oficial retornada pela API (itens_minuta)
     if (emp?.quantidadeFisicaOriginal !== undefined && emp.quantidadeFisicaOriginal !== null) {
-      return { qty: emp.quantidadeFisicaOriginal, isManual: false, isOfficial: true };
+      return { qty: emp.quantidadeFisicaOriginal, isManual: false, isOfficial: true, isDeduzido: false, isReforco: false };
     }
     if (emp?.itens_minuta && emp.itens_minuta.length > 0) {
       const targetItemNum = parseInt(item.numeroItem, 10);
       const match = emp.itens_minuta.find((i: any) => parseInt(i.numero_item_compra || '0', 10) === targetItemNum);
       if (match && typeof match.quantidade === 'number') {
-        return { qty: match.quantidade, isManual: false, isOfficial: true };
+        return { qty: match.quantidade, isManual: false, isOfficial: true, isDeduzido: false, isReforco: false };
       }
     }
     // Prioridade 2: Preenchimento manual pelo usuário se a API não retornou dados
     if (manualQtdsMap[empKey] !== undefined) {
-      return { qty: manualQtdsMap[empKey], isManual: true, isOfficial: false };
+      return { qty: manualQtdsMap[empKey], isManual: true, isOfficial: false, isDeduzido: false, isReforco: false };
     }
-    return { qty: 0, isManual: false, isOfficial: false };
+    // Prioridade 3: Dedução Temporal Oficial via Valor Unitário do Contrato
+    if (emp?.quantidadeDeduzida !== undefined) {
+      return { qty: emp.quantidadeDeduzida, isManual: false, isOfficial: true, isDeduzido: true, isReforco: !!emp.isReforco };
+    }
+    // Fallback on-the-fly se emp ainda não foi enriquecido mas temos valor unitário
+    const unitPrice = contratoObj?.valorUnitarioItem ?? item.valorUnitario;
+    if (emp?.empenhado && unitPrice) {
+      const deduction = deduceEmpenhoQuantity(emp.empenhado, unitPrice, emp.data_emissao, contratoObj?.historicoPrecos);
+      if (deduction.quantidade > 0 || deduction.isReforco) {
+        return { qty: deduction.quantidade, isManual: false, isOfficial: true, isDeduzido: true, isReforco: deduction.isReforco };
+      }
+    }
+
+    return { qty: 0, isManual: false, isOfficial: false, isDeduzido: false, isReforco: false };
   };
 
   const toggleContractExpansion = async (contrato: PncpContract) => {
@@ -964,6 +1030,40 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
             </span>
           </div>
         </div>
+
+        {/* Links externos para PNCP */}
+        {(() => {
+          const ataUrl = formatPncpAtaUrl(arp.linkAtaPNCP, arp.numeroControlePncpAta, arp.numeroAtaRegistroPreco);
+          const compraUrl = formatPncpCompraUrl(arp.linkCompraPNCP, arp.numeroControlePncpCompra, arp.numeroControlePncpAta);
+          if (!ataUrl && !compraUrl) return null;
+
+          return (
+            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {ataUrl && (
+                <a 
+                  href={ataUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', fontWeight: 600, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff', padding: '0.3rem 0.65rem' }}
+                >
+                  <ExternalLink size={12} /> Ver Ata no PNCP
+                </a>
+              )}
+              {compraUrl && (
+                <a 
+                  href={compraUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', fontWeight: 600, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff', padding: '0.3rem 0.65rem' }}
+                >
+                  <ExternalLink size={12} /> Ver Edital / Contratação no PNCP
+                </a>
+              )}
+            </div>
+          );
+        })()}
       </section>
 
       {/* Executive Item Reconciliation Audit Card */}
@@ -1485,9 +1585,45 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                       <tr>
                                         <td colSpan={7} style={{ padding: '0 0 1rem 0', background: '#f8fafc' }}>
                                           <div style={{ padding: '1rem', marginLeft: '2.5rem', marginRight: '1rem', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
-                                            <h5 style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                              <DollarSign size={14} color="var(--primary)" /> Empenhos Vinculados a este Contrato ({govEmps?.length || pncpEmps?.length || 0})
-                                            </h5>
+                                            {(() => {
+                                              const totalEmpenhadoContrato = (govEmps || []).reduce((sum, emp) => {
+                                                const k = emp.numero || String(emp.id);
+                                                const info = getEmpenhoQuantityInfo(k, emp, empenhoManualQuantities, c);
+                                                return sum + (info.qty || 0);
+                                              }, 0);
+                                              const qtdContratada = c.quantidadeContratada ?? null;
+                                              const isFechado = qtdContratada !== null && totalEmpenhadoContrato === qtdContratada;
+                                              const isParcial = qtdContratada !== null && totalEmpenhadoContrato < qtdContratada;
+                                              const isExcesso = qtdContratada !== null && totalEmpenhadoContrato > qtdContratada;
+
+                                              return (
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                  <h5 style={{ margin: 0, fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                                    <DollarSign size={14} color="var(--primary)" /> Empenhos Vinculados a este Contrato ({govEmps?.length || pncpEmps?.length || 0})
+                                                  </h5>
+                                                  {qtdContratada !== null && (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                      <span>Total Empenhado: <strong>{formatNumber(totalEmpenhadoContrato)}</strong> de <strong>{formatNumber(qtdContratada)} un</strong></span>
+                                                      {isFechado && (
+                                                        <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '12px' }}>
+                                                          ✓ 100% Empenhado
+                                                        </span>
+                                                      )}
+                                                      {isParcial && (
+                                                        <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 8px', borderRadius: '12px' }}>
+                                                          🔵 Empenhamento Parcial (Saldo: {formatNumber(qtdContratada - totalEmpenhadoContrato)} un)
+                                                        </span>
+                                                      )}
+                                                      {isExcesso && (
+                                                        <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 8px', borderRadius: '12px' }}>
+                                                          ⚠️ Excesso (+{formatNumber(totalEmpenhadoContrato - qtdContratada)} un)
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })()}
                                             
                                             {(govEmps && govEmps.length > 0) ? (
                                               <div className="table-container" style={{ marginTop: 0, overflowX: 'auto' }}>
@@ -1500,13 +1636,15 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                       <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Qtd Física (Item)</th>
                                                       <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Data de Emissão</th>
                                                       <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)' }}>Valor Empenhado</th>
+                                                      <th style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, color: 'var(--text-secondary)', width: '100px' }}>Ação</th>
                                                     </tr>
                                                   </thead>
                                                   <tbody>
                                                     {govEmps.map((emp, eidx) => {
                                                       const currentLinkId = empenhoLinks[emp.numero] || (emp.id ? empenhoLinks[String(emp.id)] : '') || '';
                                                       const empKey = emp.numero || String(emp.id);
-                                                      const qtyInfo = getEmpenhoQuantityInfo(empKey, emp);
+                                                      const qtyInfo = getEmpenhoQuantityInfo(empKey, emp, empenhoManualQuantities, c);
+                                                      const isEditing = editingEmpenhoKey === empKey;
 
                                                       return (
                                                         <tr key={`${emp.numero}-${eidx}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -1543,19 +1681,91 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
                                                             )}
                                                           </td>
                                                           <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 700 }}>
-                                                            {qtyInfo.isOfficial ? (
-                                                              <span style={{ color: 'var(--success)' }}>{formatNumber(qtyInfo.qty)} un</span>
-                                                            ) : qtyInfo.isManual ? (
-                                                              <span style={{ color: 'var(--warning)' }}>{formatNumber(qtyInfo.qty)} un (Manual)</span>
+                                                            {isEditing ? (
+                                                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                                                <input
+                                                                  type="number"
+                                                                  className="form-input"
+                                                                  value={editingEmpenhoQty}
+                                                                  onChange={(e) => setEditingEmpenhoQty(e.target.value)}
+                                                                  style={{ width: '65px', padding: '2px 4px', fontSize: '0.78rem', height: '24px', textAlign: 'center', fontWeight: 700 }}
+                                                                  autoFocus
+                                                                  onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleSaveEmpenhoQty(empKey);
+                                                                    if (e.key === 'Escape') setEditingEmpenhoKey(null);
+                                                                  }}
+                                                                />
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => handleSaveEmpenhoQty(empKey)}
+                                                                  style={{ background: '#22c55e', color: '#ffffff', border: 'none', borderRadius: '3px', padding: '2px 5px', cursor: 'pointer', height: '24px', display: 'flex', alignItems: 'center' }}
+                                                                  title="Salvar quantidade manual"
+                                                                >
+                                                                  <Check size={12} />
+                                                                </button>
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => setEditingEmpenhoKey(null)}
+                                                                  style={{ background: '#94a3b8', color: '#ffffff', border: 'none', borderRadius: '3px', padding: '2px 5px', cursor: 'pointer', height: '24px', display: 'flex', alignItems: 'center' }}
+                                                                  title="Cancelar"
+                                                                >
+                                                                  <X size={12} />
+                                                                </button>
+                                                               </div>
                                                             ) : (
-                                                              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
-                                                                N/D
-                                                              </span>
+                                                              qtyInfo.isOfficial ? (
+                                                                qtyInfo.isReforco ? (
+                                                                  <span style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                                    {formatNumber(qtyInfo.qty)} un
+                                                                    <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: '4px' }} title="Empenho complementar de reforço financeiro">
+                                                                      Reforço
+                                                                    </span>
+                                                                  </span>
+                                                                ) : (
+                                                                  <span style={{ color: 'var(--success)' }}>
+                                                                    {formatNumber(qtyInfo.qty)} un
+                                                                  </span>
+                                                                )
+                                                              ) : qtyInfo.isManual ? (
+                                                                <span style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                                  {formatNumber(qtyInfo.qty)} un
+                                                                  <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: '4px' }}>
+                                                                    Auditado
+                                                                  </span>
+                                                                </span>
+                                                              ) : (
+                                                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
+                                                                  N/D
+                                                                </span>
+                                                              )
                                                             )}
                                                           </td>
                                                           <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{formatDate(emp.data_emissao)}</td>
                                                           <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--success)', fontFamily: 'monospace' }}>
                                                             {formatCurrency(typeof emp.empenhado === 'number' ? emp.empenhado : parseFloat(String(emp.empenhado || '0').replace(/\./g, '').replace(',', '.')))}
+                                                          </td>
+                                                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                                                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => handleStartEditEmpenhoQty(empKey, qtyInfo.qty)}
+                                                                className="btn btn-secondary"
+                                                                style={{ padding: '2px 6px', fontSize: '0.72rem', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                                                                title="Ajustar quantidade física deste empenho"
+                                                              >
+                                                                <Edit2 size={11} /> Ajustar
+                                                              </button>
+                                                              {qtyInfo.isManual && (
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => handleRestoreEmpenhoQty(empKey)}
+                                                                  style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '2px', display: 'inline-flex', alignItems: 'center' }}
+                                                                  title="Restaurar para o valor oficial deduzido da API"
+                                                                >
+                                                                  <RotateCcw size={12} />
+                                                                </button>
+                                                              )}
+                                                            </div>
                                                           </td>
                                                         </tr>
                                                       );

@@ -2,6 +2,8 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { DbAta } from './supabaseClient';
 import type { ArpRecord, ArpItemRecord, SyncMetadata } from '../types';
 
+import { formatPncpAtaUrl, formatPncpCompraUrl } from '../utils/pncpUtils';
+
 /**
  * Persiste registros de ARPs buscados das APIs governamentais no Supabase
  */
@@ -59,6 +61,8 @@ export async function fetchArpsFromDb(codigoUasg?: string, numeroAta?: string): 
         numeroAtaRegistroPreco: d.numero_ata,
         codigoUnidadeGerenciadora: d.codigo_uasg,
         nomeUnidadeGerenciadora: d.nome_uasg || '',
+        linkAtaPNCP: formatPncpAtaUrl(null, d.numero_controle_pncp, d.numero_ata),
+        linkCompraPNCP: formatPncpCompraUrl(null, null, d.numero_controle_pncp),
         codigoOrgao: 0,
         nomeOrgao: d.nome_uasg || '',
         numeroCompra: d.numero_compra || '',
@@ -84,7 +88,8 @@ export async function fetchArpsFromDb(codigoUasg?: string, numeroAta?: string): 
       const syncInfo: SyncMetadata = {
         isCachedInDb: true,
         ultimoSyncEm: data[0].ultimo_sync_em,
-        dataHoraAtualizacaoApi: data[0].data_hora_atualizacao_api
+        dataHoraAtualizacaoApi: data[0].data_hora_atualizacao_api,
+        totalAtas: arps.length
       };
 
       return { arps, syncInfo };
@@ -94,6 +99,119 @@ export async function fetchArpsFromDb(codigoUasg?: string, numeroAta?: string): 
   }
 
   return { arps: [], syncInfo: { isCachedInDb: false } };
+}
+
+/**
+ * Consulta ARPs com seus respectivos Itens de forma unificada no Supabase (<50ms)
+ */
+export async function fetchArpsWithItemsFromDb(uasg?: string): Promise<{
+  arps: ArpRecord[];
+  itemsByAta: Record<string, ArpItemRecord[]>;
+  syncInfo: SyncMetadata;
+}> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { arps: [], itemsByAta: {}, syncInfo: { isCachedInDb: false } };
+  }
+
+  try {
+    let query = supabase.from('atas_registro_preco').select('*, itens_ata(*)');
+
+    if (uasg) {
+      query = query.eq('codigo_uasg', uasg);
+    }
+
+    const { data, error } = await query;
+
+    if (!error && data && data.length > 0) {
+      const itemsByAta: Record<string, ArpItemRecord[]> = {};
+      const arps: ArpRecord[] = data.map((d: any) => {
+        const key = `${d.numero_ata}-${d.codigo_uasg}`;
+
+        if (d.itens_ata && Array.isArray(d.itens_ata) && d.itens_ata.length > 0) {
+          itemsByAta[key] = d.itens_ata.map((it: any) => ({
+            numeroAtaRegistroPreco: d.numero_ata,
+            codigoUnidadeGerenciadora: d.codigo_uasg,
+            numeroCompra: d.numero_compra || '',
+            anoCompra: d.ano_compra || '',
+            codigoModalidadeCompra: '05',
+            dataAssinatura: d.data_vigencia_inicial || '',
+            dataVigenciaInicial: d.data_vigencia_inicial || '',
+            dataVigenciaFinal: d.data_vigencia_final || '',
+            numeroItem: it.numero_item,
+            codigoItem: parseInt(it.numero_item, 10) || 1,
+            descricaoItem: it.descricao_item || '',
+            tipoItem: 'Material',
+            quantidadeHomologadaItem: Number(it.quantidade_homologada) || 0,
+            classificacaoFornecedor: '001',
+            niFornecedor: it.fornecedor_cnpj_cpf || '',
+            nomeRazaoSocialFornecedor: it.fornecedor_razao_social || '',
+            quantidadeHomologadaVencedor: Number(it.quantidade_homologada) || 0,
+            valorUnitario: Number(it.valor_unitario) || 0,
+            valorTotal: Number(it.valor_total) || 0,
+            maximoAdesao: Number(it.maximo_adesao) || 0,
+            nomeUnidadeGerenciadora: d.nome_uasg || '',
+            nomeModalidadeCompra: d.modalidade || 'Pregão',
+            idCompra: `${d.codigo_uasg}${d.numero_compra}${d.ano_compra}`,
+            numeroControlePncpCompra: '',
+            dataHoraInclusao: it.ultimo_sync_em || '',
+            dataHoraAtualizacao: it.ultimo_sync_em || '',
+            quantidadeEmpenhada: 0,
+            percentualMaiorDesconto: 0,
+            situacaoSicaf: '1',
+            dataHoraExclusao: null,
+            itemExcluido: false,
+            numeroControlePncpAta: d.numero_controle_pncp || '',
+            codigoPdm: it.codigo_pdm || 0,
+            nomePdm: it.descricao_item || '',
+            quantidadeEstimadaEdital: Number(it.quantidade_homologada) || 0
+          } as ArpItemRecord));
+        }
+
+        return {
+          numeroAtaRegistroPreco: d.numero_ata,
+          codigoUnidadeGerenciadora: d.codigo_uasg,
+          nomeUnidadeGerenciadora: d.nome_uasg || '',
+          codigoOrgao: 0,
+          nomeOrgao: d.nome_uasg || '',
+          numeroCompra: d.numero_compra || '',
+          anoCompra: d.ano_compra || '',
+          codigoModalidadeCompra: '05',
+          nomeModalidadeCompra: d.modalidade || 'Pregão',
+          dataAssinatura: d.data_vigencia_inicial || '',
+          dataVigenciaInicial: d.data_vigencia_inicial || '',
+          dataVigenciaFinal: d.data_vigencia_final || '',
+          valorTotal: Number(d.valor_total) || 0,
+          statusAta: d.status_ata || 'Ata de Registro de Preços',
+          objeto: d.objeto || '',
+          quantidadeItens: d.itens_ata?.length || 0,
+          dataHoraAtualizacao: d.data_hora_atualizacao_api || new Date().toISOString(),
+          dataHoraInclusao: d.ultimo_sync_em || new Date().toISOString(),
+          dataHoraExclusao: null,
+          ataExcluido: false,
+          numeroControlePncpAta: d.numero_controle_pncp || '',
+          numeroControlePncpCompra: '',
+          idCompra: `${d.codigo_uasg}${d.numero_compra}${d.ano_compra}`
+        };
+      });
+
+      const totalItemsCount = Object.values(itemsByAta).reduce((acc, list) => acc + list.length, 0);
+
+      const syncInfo: SyncMetadata = {
+        isCachedInDb: true,
+        ultimoSyncEm: data[0]?.ultimo_sync_em || new Date().toISOString(),
+        dataHoraAtualizacaoApi: data[0]?.data_hora_atualizacao_api,
+        totalAtas: arps.length,
+        totalItens: totalItemsCount,
+        status: 'SUCCESS'
+      };
+
+      return { arps, itemsByAta, syncInfo };
+    }
+  } catch (error) {
+    console.warn('Falha ao ler ARPs com itens do Supabase', error);
+  }
+
+  return { arps: [], itemsByAta: {}, syncInfo: { isCachedInDb: false } };
 }
 
 /**

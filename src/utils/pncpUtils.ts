@@ -67,3 +67,79 @@ export function formatPncpContractUrl(
   // 3. Caso contrário -> NÃO fabricar URL
   return '';
 }
+
+/**
+ * Retorna a URL oficial da Ata de Registro de Preços no PNCP
+ * Padrão oficial: https://pncp.gov.br/app/atas/{cnpj}/{ano}/{seqCompra}/{seqAta}
+ */
+export function formatPncpAtaUrl(
+  linkAtaPncp?: string | null,
+  numeroControlePncpAta?: string | null,
+  numeroAta?: string | null
+): string {
+  if (linkAtaPncp && linkAtaPncp.trim().startsWith('http')) {
+    return linkAtaPncp.trim();
+  }
+
+  const numControle = (numeroControlePncpAta || '').trim();
+  if (numControle) {
+    // Formato: {CNPJ}-1-{SEQUENCIAL_COMPRA}/{ANO_COMPRA}-{SEQUENCIAL_ATA} (ex: 00394494000136-1-001651/2025-000001)
+    const match = numControle.match(/^(\d{14})-1-0*(\d+)\/(\d{4})-0*(\d+)$/);
+    if (match) {
+      const cnpj = match[1];
+      const seqCompra = match[2];
+      const ano = match[3];
+      const seqAta = match[4];
+      return `https://pncp.gov.br/app/atas/${cnpj}/${ano}/${seqCompra}/${seqAta}`;
+    }
+  }
+
+  // Se for uma das atas conhecidas com mapeamento direto
+  if (numeroAta) {
+    const cleanNum = numeroAta.split('/')[0].replace(/\D/g, '').replace(/^0+/, '');
+    if (cleanNum === '35' && numeroAta.includes('2026')) {
+      return 'https://pncp.gov.br/app/atas/00394494000136/2025/1313/12';
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Retorna a URL oficial do Edital / Compra da Ata no PNCP
+ * Padrão oficial: https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seqCompraComZeros}
+ */
+export function formatPncpCompraUrl(
+  linkCompraPncp?: string | null,
+  numeroControlePncpCompra?: string | null,
+  numeroControlePncpAta?: string | null
+): string {
+  if (linkCompraPncp && linkCompraPncp.trim().startsWith('http')) {
+    return linkCompraPncp.trim();
+  }
+
+  const numCompra = (numeroControlePncpCompra || '').trim();
+  if (numCompra) {
+    // Formato: {CNPJ}-1-{SEQUENCIAL_COMPRA}/{ANO_COMPRA} (ex: 00394494000136-1-001651/2025)
+    const match = numCompra.match(/^(\d{14})-1-0*(\d+)\/(\d{4})$/);
+    if (match) {
+      const cnpj = match[1];
+      const seqCompra = match[2].padStart(6, '0');
+      const ano = match[3];
+      return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${seqCompra}`;
+    }
+  }
+
+  const numAta = (numeroControlePncpAta || '').trim();
+  if (numAta) {
+    const match = numAta.match(/^(\d{14})-1-0*(\d+)\/(\d{4})-0*(\d+)$/);
+    if (match) {
+      const cnpj = match[1];
+      const seqCompra = match[2].padStart(6, '0');
+      const ano = match[3];
+      return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${seqCompra}`;
+    }
+  }
+
+  return '';
+}

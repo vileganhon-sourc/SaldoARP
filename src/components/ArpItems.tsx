@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, HelpCircle, ShoppingBag, Eye, Users, Award, ExternalLink, DollarSign, RefreshCw } from 'lucide-react';
-import { fetchArpItems } from '../services/api';
+import { ChevronLeft, HelpCircle, ShoppingBag, Eye, Users, Award, ExternalLink, DollarSign, RefreshCw, CheckCircle } from 'lucide-react';
+import { fetchArpItems, fetchPncpAtaVigencia, enrichArpWithPncpVigencia } from '../services/api';
+import { cacheArpsInDb } from '../services/dbCacheService';
+import { formatPncpAtaUrl, formatPncpCompraUrl } from '../utils/pncpUtils';
 import type { ArpRecord, ArpItemRecord } from '../types';
 
 interface ArpItemsProps {
@@ -10,6 +12,7 @@ interface ArpItemsProps {
 }
 
 export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack }) => {
+  const [currentArp, setCurrentArp] = useState<ArpRecord>(arp);
   const [items, setItems] = useState<ArpItemRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -24,17 +27,30 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
     }
     setError(null);
     try {
+      let workingArp = { ...currentArp };
+
+      // 1. Enriquece a vigência oficial e cancelamento diretamente do PNCP
+      if (workingArp.numeroControlePncpAta) {
+        const pncpInfo = await fetchPncpAtaVigencia(workingArp.numeroControlePncpAta);
+        if (pncpInfo) {
+          workingArp = enrichArpWithPncpVigencia(workingArp, pncpInfo);
+          setCurrentArp(workingArp);
+          cacheArpsInDb([workingArp]);
+        }
+      }
+
+      // 2. Busca os itens da Ata
       const data = await fetchArpItems(
-        arp.dataVigenciaInicial,
-        arp.codigoUnidadeGerenciadora,
-        arp.numeroAtaRegistroPreco
+        workingArp.dataVigenciaInicial,
+        workingArp.codigoUnidadeGerenciadora,
+        workingArp.numeroAtaRegistroPreco
       );
       
       let filtered = data.resultado || [];
       
-      if (arp.numeroControlePncpAta) {
+      if (workingArp.numeroControlePncpAta) {
         filtered = filtered.filter(item => 
-          !item.numeroControlePncpAta || item.numeroControlePncpAta === arp.numeroControlePncpAta
+          !item.numeroControlePncpAta || item.numeroControlePncpAta === workingArp.numeroControlePncpAta
         );
       }
       
@@ -59,6 +75,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
   };
 
   useEffect(() => {
+    setCurrentArp(arp);
     loadItemsData(false);
   }, [arp]);
 
@@ -123,8 +140,13 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-              <span className="badge badge-info">Ata nº {arp.numeroAtaRegistroPreco}</span>
-              <span className="badge badge-success">UASG Gerenciadora: {arp.codigoUnidadeGerenciadora}</span>
+              <span className="badge badge-info">Ata nº {currentArp.numeroAtaRegistroPreco}</span>
+              <span className="badge badge-success">UASG Gerenciadora: {currentArp.codigoUnidadeGerenciadora}</span>
+              {currentArp.prorrogadaPncp && (
+                <span className="badge" style={{ backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', fontSize: '0.75rem', fontWeight: 700 }}>
+                  <CheckCircle size={12} style={{ display: 'inline', marginRight: '3px' }} /> Prorrogada no PNCP até {formatDate(currentArp.dataVigenciaFinal)}
+                </span>
+              )}
               {syncStatus && (
                 <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #86efac', fontSize: '0.75rem' }}>
                   ✓ {syncStatus}
@@ -132,7 +154,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
               )}
             </div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              {arp.nomeUnidadeGerenciadora}
+              {currentArp.nomeUnidadeGerenciadora}
             </h2>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -169,7 +191,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
               Objeto da Ata
             </span>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'justify', lineHeight: '1.5' }}>
-              {arp.objeto}
+              {currentArp.objeto}
             </div>
           </div>
 
@@ -181,7 +203,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
                 Órgão Superior
               </span>
               <span className="meta-value" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem', fontWeight: 600 }}>
-                {arp.nomeOrgao || arp.nomeUnidadeGerenciadora}
+                {currentArp.nomeOrgao || currentArp.nomeUnidadeGerenciadora}
               </span>
             </div>
 
@@ -191,7 +213,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
                   Vigência
                 </span>
                 <span className="meta-value" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem', fontWeight: 600 }}>
-                  {formatDate(arp.dataVigenciaInicial)} a {formatDate(arp.dataVigenciaFinal)}
+                  {formatDate(currentArp.dataVigenciaInicial)} a {formatDate(currentArp.dataVigenciaFinal)}
                 </span>
               </div>
 
@@ -200,7 +222,7 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
                   Valor Total da Ata
                 </span>
                 <span className="meta-value" style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--success)', marginTop: '0.2rem', fontFamily: 'monospace' }}>
-                  {formatCurrency(arp.valorTotal)}
+                  {formatCurrency(currentArp.valorTotal)}
                 </span>
               </div>
             </div>
@@ -210,18 +232,38 @@ export const ArpItems: React.FC<ArpItemsProps> = ({ arp, onSelectItem, onBack })
         </div>
 
         {/* External links */}
-        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-          {arp.linkAtaPNCP && (
-            <a href={arp.linkAtaPNCP} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 500 }}>
-              Ver Ata no PNCP <ExternalLink size={12} />
-            </a>
-          )}
-          {arp.linkCompraPNCP && (
-            <a href={arp.linkCompraPNCP} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 500 }}>
-              Ver Licitação no PNCP <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
+        {(() => {
+          const ataUrl = formatPncpAtaUrl(currentArp.linkAtaPNCP, currentArp.numeroControlePncpAta, currentArp.numeroAtaRegistroPreco);
+          const compraUrl = formatPncpCompraUrl(currentArp.linkCompraPNCP, currentArp.numeroControlePncpCompra, currentArp.numeroControlePncpAta);
+          if (!ataUrl && !compraUrl) return null;
+
+          return (
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {ataUrl && (
+                <a 
+                  href={ataUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff', padding: '0.35rem 0.75rem' }}
+                >
+                  <ExternalLink size={13} /> Ver Ata no PNCP
+                </a>
+              )}
+              {compraUrl && (
+                <a 
+                  href={compraUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600, color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff', padding: '0.35rem 0.75rem' }}
+                >
+                  <ExternalLink size={13} /> Ver Edital / Contratação no PNCP
+                </a>
+              )}
+            </div>
+          );
+        })()}
       </section>
 
       {/* Items section */}

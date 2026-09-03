@@ -15,9 +15,10 @@ import {
   Layers, 
   ChevronDown, 
   ChevronUp, 
-  Printer
+  Printer,
+  Trash2
 } from 'lucide-react';
-import { fetchAllAllocationsGlobal, fetchEmpenhoLinks, type GlobalAllocationRecord } from '../services/allocationService';
+import { fetchAllAllocationsGlobal, fetchEmpenhoLinks, clearAllAllocations, type GlobalAllocationRecord } from '../services/allocationService';
 import { fetchArps, fetchArpItems, fetchEmpenhosSaldoItem } from '../services/api';
 import { fetchArpsFromDb } from '../services/dbCacheService';
 import { ManageDepartmentsModal } from './ManageDepartmentsModal';
@@ -510,6 +511,14 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
     return new Intl.NumberFormat('pt-BR').format(val);
   };
 
+  const handleClearAllAllocations = async () => {
+    if (window.confirm('⚠️ ATENÇÃO: Tem certeza que deseja ZERAR todas as alocações internas e vínculos de empenhos de todas as atas? Esta ação removerá todas as cotas cadastradas.')) {
+      await clearAllAllocations();
+      await loadData();
+      alert('Todas as alocações internas foram zeradas com sucesso!');
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       
@@ -534,6 +543,15 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button 
+            type="button" 
+            onClick={handleClearAllAllocations} 
+            className="btn btn-secondary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#dc2626', borderColor: '#fca5a5' }}
+            title="Zerar todas as cotas alocadas de todas as atas"
+          >
+            <Trash2 size={16} /> Zerar Alocações
+          </button>
           <button 
             type="button" 
             onClick={() => setIsManageDepsModalOpen(true)} 

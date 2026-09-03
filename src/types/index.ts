@@ -197,6 +197,14 @@ export interface PncpContract {
   valorTotalItem?: number | null;
   numeroItemContratado?: string;
   linkVisualizacao?: string;
+  historicoPrecos?: HistoricoItemPrice[];
+}
+
+export interface HistoricoItemPrice {
+  dataTermo: string;
+  valorUnitario: number;
+  quantidade?: number;
+  tipoHistorico?: string;
 }
 
 export interface EmpenhoItemMinuta {
@@ -243,6 +251,9 @@ export interface ContratosGovEmpenhoRecord {
   itens_minuta?: EmpenhoItemMinuta[];
   quantidadeFisicaOriginal?: number;
   quantidadeManual?: number;
+  quantidadeDeduzida?: number;
+  isDeduzido?: boolean;
+  isReforco?: boolean;
 }
 
 export interface ComprasGovContratoItemRecord {
@@ -302,6 +313,10 @@ export interface SyncMetadata {
   ultimoSyncEm?: string;
   dataHoraAtualizacaoApi?: string;
   divergenciaDetectada?: boolean;
+  totalAtas?: number;
+  totalItens?: number;
+  status?: 'SUCCESS' | 'SYNCING' | 'ERROR' | 'IDLE';
+  mensagem?: string;
 }
 
 export interface ExtendedInternalAllocation extends InternalAllocation {

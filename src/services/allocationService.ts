@@ -211,6 +211,18 @@ export async function saveEmpenhoManualQuantities(itemKey: string, quantities: R
   }
 }
 
+export async function removeEmpenhoManualQuantity(itemKey: string, empKey: string): Promise<Record<string, number>> {
+  try {
+    const current = await fetchEmpenhoManualQuantities(itemKey);
+    delete current[empKey];
+    await saveEmpenhoManualQuantities(itemKey, current);
+    return current;
+  } catch (e) {
+    console.error('Erro ao remover quantidade manual do empenho no localStorage', e);
+    return {};
+  }
+}
+
 // -------------------------------------------------------------
 // Persistência de Empenhos Manuais Canônicos
 // -------------------------------------------------------------
@@ -283,6 +295,41 @@ export async function saveContratoEmpenhoLinks(itemKey: string, links: ContratoE
     localStorage.setItem(key, JSON.stringify(links));
   } catch (e) {
     console.error('Erro ao salvar links contrato-empenho no localStorage', e);
+  }
+}
+
+/**
+ * Zera todas as alocações internas e vínculos de empenhos do sistema (LocalStorage e Supabase)
+ */
+export async function clearAllAllocations(): Promise<void> {
+  // 1. Limpa chaves de alocações e vínculos do LocalStorage
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('saldoarp-allocations-') ||
+          key.startsWith('saldoarp-empenho-links-') ||
+          key.startsWith('saldoarp-empenho-quantities-')
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch (e) {
+      console.error('Erro ao limpar alocações do localStorage', e);
+    }
+  }
+
+  // 2. Limpa tabelas de alocações do Supabase se configurado
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('arp_allocations').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('empenho_links').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch (e) {
+      console.warn('Erro ao limpar alocações no Supabase', e);
+    }
   }
 }
 

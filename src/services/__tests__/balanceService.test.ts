@@ -12,7 +12,9 @@ import {
   matchAndMergeEmpenhos,
   normalizeEmpenhoNumero,
   getEmpenhoCanonicalKey,
-  calculateItemCardMetrics
+  calculateItemCardMetrics,
+  deduceEmpenhoQuantity,
+  parseMoneyValue
 } from '../balanceService';
 import { enrichArpWithPncpVigencia } from '../api';
 import type { Empenho, Contrato, ContratoEmpenho, ArpRecord } from '../../types';
@@ -682,6 +684,124 @@ describe('balanceService - Suíte de 20 Testes Obrigatórios e Invariantes Cont�
     expect(itemEstimadoEdital).toBe(450);
   });
 
+  // Teste 35: Dedução oficial direta de quantidade física via valor unitário
+  it('35. Deve deduzir com exatidão matemática a quantidade física dos empenhos contratuais vinculados', () => {
+    // Caso real SENASP: Contrato 00011/2026, Valor Unitário R$ 153.000,00
+    const emp663 = deduceEmpenhoQuantity(1530000, 153000);
+    expect(emp663.quantidade).toBe(10);
+    expect(emp663.isExato).toBe(true);
+    expect(emp663.isReforco).toBe(false);
+
+    const emp665 = deduceEmpenhoQuantity(153000, 153000);
+    expect(emp665.quantidade).toBe(1);
+    expect(emp665.isExato).toBe(true);
+    expect(emp665.isReforco).toBe(false);
+
+    // Soma das quantidades deduzidas fecha 10 + 1 = 11 un (100% da quantidade contratada)
+    expect(emp663.quantidade + emp665.quantidade).toBe(11);
+  });
+
+  // Teste 36: Suporte a strings monetárias formatadas em padrão brasileiro (R$)
+  it('36. Deve realizar dedução correta a partir de strings com formatação monetária brasileira', () => {
+    const res = deduceEmpenhoQuantity('1.530.000,00', '153.000,00');
+    expect(res.quantidade).toBe(10);
+    expect(res.isExato).toBe(true);
+    expect(res.valorUnitarioAplicado).toBe(153000);
+  });
+
+  // Teste 37: Dedução temporal com histórico de reajustes contratuais (Termos Aditivos)
+  it('37. Deve aplicar o valor unitário temporal vigente com base na data de emissão do empenho e histórico de termos', () => {
+    const historicoPrecos = [
+      { dataTermo: '2025-01-15', valorUnitario: 100 }, // Contrato inicial
+      { dataTermo: '2026-01-15', valorUnitario: 120 }  // Termo Aditivo 1 (Reajuste)
+    ];
+
+    // Empenho emitido em 2025 (antes do reajuste): divide por 100
+    const emp2025 = deduceEmpenhoQuantity(1000, 100, '2025-06-01', historicoPrecos);
+    expect(emp2025.quantidade).toBe(10);
+    expect(emp2025.valorUnitarioAplicado).toBe(100);
+
+    // Empenho emitido em 2026 (após o reajuste): divide por 120
+    const emp2026 = deduceEmpenhoQuantity(1200, 100, '2026-03-01', historicoPrecos);
+    expect(emp2026.quantidade).toBe(10);
+    expect(emp2026.valorUnitarioAplicado).toBe(120);
+  });
+
+  // Teste 38: Identificação de empenhos complementares de reforço financeiro puro
+  it('38. Deve sinalizar empenhos de reforço quando o valor não divide de forma exata pelo preço unitário', () => {
+    // Empenho de reforço de R$ 15.000,00 sobre um item de R$ 153.000,00 (diferença residual)
+    const res = deduceEmpenhoQuantity(15000, 153000);
+    expect(res.quantidade).toBe(0);
+    expect(res.isExato).toBe(false);
+    expect(res.isReforco).toBe(true);
+  });
+
+  // Teste 39: Conversão e sanitização de valores monetários
+  it('39. Deve converter com robustez múltiplos formatos monetários com parseMoneyValue', () => {
+    expect(parseMoneyValue('1.683.000,00')).toBe(1683000);
+    expect(parseMoneyValue('153000.50')).toBe(153000.5);
+    expect(parseMoneyValue(153000)).toBe(153000);
+    expect(parseMoneyValue('')).toBe(0);
+    expect(parseMoneyValue(null)).toBe(0);
+    expect(parseMoneyValue(undefined)).toBe(0);
+  });
+
+  // Teste 40: Casos limite (preço unitário zero ou empenho zerado)
+  it('40. Deve tratar com segurança casos limites com preço unitário ou valor zerado', () => {
+    const resZeroUnit = deduceEmpenhoQuantity(1000, 0);
+    expect(resZeroUnit.quantidade).toBe(0);
+    expect(resZeroUnit.isExato).toBe(false);
+
+    const resZeroEmp = deduceEmpenhoQuantity(0, 150);
+    expect(resZeroEmp.quantidade).toBe(0);
+    expect(resZeroEmp.isExato).toBe(false);
+  });
+
+  // Teste 41: Validação de fechamento contratual 100% empenhado
+  it('41. Deve validar fechamento exato de contrato quando a soma dos empenhos iguala a quantidade contratada', () => {
+    const qtdContratada = 11;
+    const empenhosContrato = [
+      deduceEmpenhoQuantity(1530000, 153000).quantidade, // 10 un
+      deduceEmpenhoQuantity(153000, 153000).quantidade    // 1 un
+    ];
+    const totalEmpenhado = empenhosContrato.reduce((a, b) => a + b, 0);
+
+    expect(totalEmpenhado).toBe(qtdContratada);
+    expect(totalEmpenhado === qtdContratada).toBe(true);
+  });
+
+  // Teste 42: Validação de empenhamento parcial de contrato e saldo a empenhar
+  it('42. Deve calcular saldo remanescente a empenhar em contratos com execução parcial', () => {
+    const qtdContratada = 20;
+    const empenhosContrato = [
+      deduceEmpenhoQuantity(1530000, 153000).quantidade // 10 un emitidas
+    ];
+    const totalEmpenhado = empenhosContrato.reduce((a, b) => a + b, 0);
+    const saldoAEmpenhar = qtdContratada - totalEmpenhado;
+
+    expect(totalEmpenhado).toBe(10);
+    expect(saldoAEmpenhar).toBe(10);
+    expect(totalEmpenhado < qtdContratada).toBe(true);
+  });
+
+  // Teste 43: Validação de override manual de quantidade de empenho contratual e restauração
+  it('43. Deve permitir override manual de quantidade e subsequente restauração para o valor oficial deduzido', () => {
+    const empOficial = deduceEmpenhoQuantity(1530000, 153000);
+    expect(empOficial.quantidade).toBe(10);
+
+    // Gestor faz override manual para 12 un (ajuste de auditoria)
+    const manualOverrides: Record<string, number> = { '2025NE000663': 12 };
+    const effectiveQty = manualOverrides['2025NE000663'] ?? empOficial.quantidade;
+    expect(effectiveQty).toBe(12);
+
+    // Gestor restaura para o oficial
+    delete manualOverrides['2025NE000663'];
+    const restoredQty = manualOverrides['2025NE000663'] ?? empOficial.quantidade;
+    expect(restoredQty).toBe(10);
+  });
+
 });
+
+
 
 

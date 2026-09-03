@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Calendar, FileText, Building2, HelpCircle, DollarSign, Users, TrendingUp, BarChart2, ArrowUpRight } from 'lucide-react';
-import { fetchArps, fetchArpItems, fetchArpItemsBatch, enrichArpsBatchWithPncpVigencia } from '../services/api';
-import { fetchAtasWithEmpenhosSet, fetchAtasWithAllocationsSet } from '../services/dbCacheService';
-import type { ArpRecord, ArpItemRecord, FilterParams } from '../types';
+import { Search, Calendar, FileText, Building2, HelpCircle, DollarSign, Users, TrendingUp, BarChart2, ArrowUpRight, Trash2 } from 'lucide-react';
+import { fetchArpItems, matchAtaNumber } from '../services/api';
+import { fetchAtasWithEmpenhosSet, fetchAtasWithAllocationsSet, fetchArpsWithItemsFromDb } from '../services/dbCacheService';
+import { runFullSync, checkAndTriggerAutoSync, getLastSyncMetadata } from '../services/syncService';
+import { clearAllAllocations } from '../services/allocationService';
+import { SyncStatusBadge } from './SyncStatusBadge';
+import type { ArpRecord, ArpItemRecord, FilterParams, SyncMetadata } from '../types';
 import { AtaCard } from './cards/AtaCard';
 import { AtaCardSkeleton } from './cards/AtaCardSkeleton';
 import { groupArpsAndItems } from '../utils/ataGrouping';
@@ -34,6 +37,11 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sync state
+  const [syncInfo, setSyncInfo] = useState<SyncMetadata>(getLastSyncMetadata());
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncProgress, setSyncProgress] = useState<{ step: string; percent: number; current?: number; total?: number } | null>(null);
+
   const loadDbSets = async () => {
     try {
       const [empSet, allocSet] = await Promise.all([
@@ -47,10 +55,57 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
     }
   };
 
+  /**
+   * Consulta primariamente o banco de dados Supabase (<50ms)
+   */
+  const loadFromDatabase = async (uasgToLoad?: string): Promise<boolean> => {
+    const targetUasg = uasgToLoad || params.codigoUnidadeGerenciadora || '200331';
+    setLoading(true);
+    setError(null);
+
+    try {
+      const dbResult = await fetchArpsWithItemsFromDb(targetUasg);
+      if (dbResult.arps && dbResult.arps.length > 0) {
+        setArps(dbResult.arps);
+        setItemsByAta(dbResult.itemsByAta || {});
+        setSyncInfo(dbResult.syncInfo);
+        setLoading(false);
+        return true;
+      }
+    } catch (e) {
+      console.warn('Erro ao consultar banco local:', e);
+    }
+    setLoading(false);
+    return false;
+  };
+
+  /**
+   * Dispara a sincronização manual ou inicial com as APIs do governo
+   */
+  const handleTriggerSync = async () => {
+    setIsSyncing(true);
+    setError(null);
+    setSyncProgress({ step: 'Iniciando sincronização...', percent: 5 });
+
+    try {
+      const result = await runFullSync(params, (p) => setSyncProgress(p));
+      if (result.success) {
+        await loadFromDatabase(params.codigoUnidadeGerenciadora);
+      } else {
+        setError(result.error || 'Falha ao sincronizar com as APIs governamentais.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Erro durante a sincronização.');
+    } finally {
+      setIsSyncing(false);
+      setSyncProgress(null);
+    }
+  };
+
   const loadItemsForArps = async (arpsList: ArpRecord[]) => {
     if (!arpsList || arpsList.length === 0) return;
 
-    // Apenas carregar itens sob demanda para as primeiras atas visíveis que ainda não possuam itens
+    // Apenas carregar itens sob demanda para as primeiras atas que ainda não possuam itens
     const toFetch = arpsList.slice(0, 15).filter(arp => {
       const key = `${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}`;
       return itemsByAta[key] === undefined && !itemsLoadingByAta[key];
@@ -66,7 +121,6 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
       return next;
     });
 
-    // Concorrência controlada (máximo 3 requisições simultâneas)
     const batchSize = 3;
     for (let i = 0; i < toFetch.length; i += batchSize) {
       const chunk = toFetch.slice(i, i + batchSize);
@@ -102,48 +156,31 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
-    if (!params.dataVigenciaInicialMin || !params.dataVigenciaInicialMax) {
-      setError('As datas de início de vigência mínima e máxima são obrigatórias.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      // 1. Carrega a lista de Atas rapidamente e renderiza a tela de imediato
-      const data = await fetchArps(params);
-      const results = data.resultado || [];
-      setArps(results);
-      setLoading(false);
-
-      if (results.length === 0) {
-        setError('Nenhuma Ata encontrada para os filtros especificados.');
-        return;
+    // Na arquitetura Database-First, a busca filtra instantaneamente a partir do banco carregado
+    // Se a lista estiver vazia, tenta recarregar do banco
+    if (arps.length === 0) {
+      const foundInDb = await loadFromDatabase(params.codigoUnidadeGerenciadora);
+      if (!foundInDb) {
+        await handleTriggerSync();
       }
-
-      // 2. Carrega itens em lote e sincroniza PNCP em segundo plano sem travar a interface
-      fetchArpItemsBatch(params).then(batchItems => {
-        if (batchItems && Object.keys(batchItems).length > 0) {
-          setItemsByAta(prev => ({ ...prev, ...batchItems }));
-        }
-      }).catch(err => {
-        console.warn('Erro ao carregar itens em lote em segundo plano:', err);
-      });
-
-      enrichArpsBatchWithPncpVigencia(results, (updated) => setArps(updated)).catch((e) => {
-        console.warn('Erro na sincronização de vigência PNCP em segundo plano:', e);
-      });
-
-    } catch (err: any) {
-      setError(err.message || 'Falha ao buscar as Atas de Registro de Preço na API.');
-      setLoading(false);
     }
   };
 
-  // Automatically trigger search on mount to load initial list
+  // Inicialização Database-First com auto-sync em background a cada 3h
   useEffect(() => {
-    loadDbSets();
-    handleSearch();
+    const init = async () => {
+      await loadDbSets();
+      const hasDbData = await loadFromDatabase();
+      if (!hasDbData) {
+        await handleTriggerSync();
+      } else {
+        // Verifica se precisa de auto-sync a cada 3h em background
+        checkAndTriggerAutoSync(params.codigoUnidadeGerenciadora, () => {
+          loadFromDatabase();
+        });
+      }
+    };
+    init();
   }, []);
 
   const formatCurrency = (val: number) => {
@@ -288,6 +325,18 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
   // Process filters and sorting on the clientside
   const processedArps = arps
     .filter(arp => {
+      if (params.numeroAtaRegistroPreco) {
+        return matchAtaNumber(arp.numeroAtaRegistroPreco, params.numeroAtaRegistroPreco);
+      }
+      return true;
+    })
+    .filter(arp => {
+      if (params.codigoUnidadeGerenciadora) {
+        return arp.codigoUnidadeGerenciadora.includes(params.codigoUnidadeGerenciadora.trim());
+      }
+      return true;
+    })
+    .filter(arp => {
       const isExpired = !!(arp.isCanceladaPncp || new Date(arp.dataVigenciaFinal) < new Date());
       if (filterVigencia === 'VIGENTE') return !isExpired;
       if (filterVigencia === 'EXPIRADA') return isExpired;
@@ -429,11 +478,43 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <TrendingUp size={16} /> Saldo Unidades Internas
             </div>
-            {onOpenAllocationsPanel && (
-              <span style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px' }}>
-                Ver Painel <ArrowUpRight size={13} />
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {kpis.totalAllocatedQty > 0 && (
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (window.confirm('⚠️ Tem certeza que deseja ZERAR todas as alocações internas de saldo e vínculos de empenhos?')) {
+                      await clearAllAllocations();
+                      await loadDbSets();
+                      setArps([...arps]);
+                      alert('Alocações internas zeradas com sucesso!');
+                    }
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#dc2626',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    padding: '2px 4px',
+                    borderRadius: '4px'
+                  }}
+                  title="Zerar todas as alocações internas cadastradas"
+                >
+                  <Trash2 size={12} /> Zerar
+                </button>
+              )}
+              {onOpenAllocationsPanel && (
+                <span style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                  Ver Painel <ArrowUpRight size={13} />
+                </span>
+              )}
+            </div>
           </div>
           
           <div className="kpi-value">
@@ -479,13 +560,16 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
 
       {/* Search Filter Card */}
       <section className="comprassusp-filter-card">
-        <div className="filter-header">
+        <div className="filter-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
           <h2 className="section-title" style={{ fontSize: '1.2rem', margin: 0, borderBottom: 'none', paddingBottom: 0 }}>
             <Search size={20} color="var(--primary)" /> Filtrar Atas de Registro de Preços
           </h2>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Campos marcados com * são obrigatórios para busca na API
-          </span>
+          <SyncStatusBadge
+            syncInfo={syncInfo}
+            isSyncing={isSyncing}
+            syncProgress={syncProgress}
+            onTriggerSync={handleTriggerSync}
+          />
         </div>
 
         <form onSubmit={handleSearch} className="filter-body">

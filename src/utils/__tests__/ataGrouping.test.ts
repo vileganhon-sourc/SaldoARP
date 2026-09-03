@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeAdesaoStatus, formatCurrencyBRL, formatItemNumber, groupArpsAndItems } from '../ataGrouping';
-import { formatPncpContractUrl } from '../pncpUtils';
+import { formatPncpContractUrl, formatPncpAtaUrl, formatPncpCompraUrl } from '../pncpUtils';
 import { getCanonicalContractKey } from '../../services/api';
 import type { ArpRecord, ArpItemRecord } from '../../types';
 
@@ -183,5 +183,32 @@ describe('Agrupamento de Atas e Utilitários', () => {
     // Caso real: Contrato 00192/2026 com numeroControlePncp 00394494000136-2-000001/2026 normaliza para 192/2026
     expect(getCanonicalContractKey('00192/2026', '2026', '00394494000136-2-000001/2026')).toBe('192/2026');
     expect(getCanonicalContractKey('00192/2026')).toBe('192/2026');
+  });
+
+  it('Formatação oficial de URLs de Atas e Compras/Editais no PNCP', () => {
+    // 1. Ata com link direto
+    expect(
+      formatPncpAtaUrl('https://pncp.gov.br/app/atas/00394494000136/2025/1651/1', '00394494000136-1-001651/2025-000001')
+    ).toBe('https://pncp.gov.br/app/atas/00394494000136/2025/1651/1');
+
+    // 2. Ata a partir de numeroControlePncpAta (ex: Ata 24/2026)
+    expect(
+      formatPncpAtaUrl(undefined, '00394494000136-1-001651/2025-000001')
+    ).toBe('https://pncp.gov.br/app/atas/00394494000136/2025/1651/1');
+
+    // 3. Compra/Edital a partir de numeroControlePncpCompra
+    expect(
+      formatPncpCompraUrl(undefined, '00394494000136-1-001651/2025')
+    ).toBe('https://pncp.gov.br/app/editais/00394494000136/2025/001651');
+
+    // 4. Compra/Edital a partir de numeroControlePncpAta
+    expect(
+      formatPncpCompraUrl(undefined, undefined, '00394494000136-1-001651/2025-000001')
+    ).toBe('https://pncp.gov.br/app/editais/00394494000136/2025/001651');
+
+    // 5. Ata 00035/2026 específica
+    expect(
+      formatPncpAtaUrl(undefined, undefined, '00035/2026')
+    ).toBe('https://pncp.gov.br/app/atas/00394494000136/2025/1313/12');
   });
 });

@@ -421,3 +421,102 @@ export function calculateItemCardMetrics(params: {
   };
 }
 
+/**
+ * Converte valores monetários em string (formatos "1.530.000,00", "153000.00", etc.) ou número em número float puro.
+ */
+export function parseMoneyValue(val: number | string | undefined | null): number {
+  if (val === undefined || val === null) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const cleaned = String(val).trim();
+  if (!cleaned) return 0;
+  // Se tem vírgula como decimal (padrão BR): remove pontos de milhar e troca vírgula por ponto
+  if (cleaned.includes(',')) {
+    const num = parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+    return isNaN(num) ? 0 : num;
+  }
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+/**
+ * Deduz a quantidade física oficial de uma Nota de Empenho vinculada a contrato,
+ * respeitando o valor unitário base e a linha do tempo de reajustes contratuais (historico_item).
+ */
+export function deduceEmpenhoQuantity(
+  valorEmpenhadoRaw: number | string | undefined | null,
+  valorUnitarioBaseRaw: number | string | undefined | null,
+  dataEmissao?: string,
+  historicoPrecos?: Array<{ dataTermo: string; valorUnitario: number; quantidade?: number }>
+): {
+  quantidade: number;
+  isExato: boolean;
+  isReforco: boolean;
+  valorUnitarioAplicado: number;
+} {
+  const valorEmpenhado = parseMoneyValue(valorEmpenhadoRaw);
+  let valorUnitarioAplicado = parseMoneyValue(valorUnitarioBaseRaw);
+
+  // Se houver histórico de termos contratuais com datas e o empenho tiver data_emissao,
+  // localiza o valor unitário vigente na data da emissão do empenho.
+  if (historicoPrecos && historicoPrecos.length > 0) {
+    const validHistory = historicoPrecos
+      .filter(h => h.valorUnitario > 0 && h.dataTermo)
+      .sort((a, b) => new Date(a.dataTermo).getTime() - new Date(b.dataTermo).getTime());
+
+    if (validHistory.length > 0) {
+      if (dataEmissao) {
+        const empDate = new Date(dataEmissao).getTime();
+        // Encontra o termo mais recente cuja data seja anterior ou igual à data de emissão
+        let matched = validHistory[0];
+        for (const term of validHistory) {
+          if (new Date(term.dataTermo).getTime() <= empDate) {
+            matched = term;
+          } else {
+            break;
+          }
+        }
+        if (matched && matched.valorUnitario > 0) {
+          valorUnitarioAplicado = matched.valorUnitario;
+        }
+      } else {
+        // Se não houver data, usa o último termo conhecido
+        const last = validHistory[validHistory.length - 1];
+        if (last && last.valorUnitario > 0) {
+          valorUnitarioAplicado = last.valorUnitario;
+        }
+      }
+    }
+  }
+
+  if (valorUnitarioAplicado <= 0 || valorEmpenhado <= 0) {
+    return {
+      quantidade: 0,
+      isExato: false,
+      isReforco: false,
+      valorUnitarioAplicado: 0
+    };
+  }
+
+  const rawQty = valorEmpenhado / valorUnitarioAplicado;
+  const rounded = Math.round(rawQty);
+  const diff = Math.abs(rawQty - rounded);
+
+  // Tolerância para imprecisões de ponto flutuante (ex: 9.999999999 ou 10.000000001)
+  if (diff < 0.001) {
+    return {
+      quantidade: rounded,
+      isExato: true,
+      isReforco: false,
+      valorUnitarioAplicado
+    };
+  }
+
+  // Divisão não exata: indica empenho complementar de reajuste ou ajuste residual financeiro
+  return {
+    quantidade: Math.floor(rawQty),
+    isExato: false,
+    isReforco: true,
+    valorUnitarioAplicado
+  };
+}
+
