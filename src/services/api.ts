@@ -100,6 +100,7 @@ export function matchAtaNumber(target?: string, query?: string): boolean {
 
 // Cache em memória para requisições de atas por chave de consulta (UASG + período)
 const arpsMemoryCache = new Map<string, ArpRecord[]>();
+const contratosGovUgListCache = new Map<string, any[]>();
 
 /**
  * 1. Consultar ARP
@@ -847,28 +848,32 @@ export async function fetchContratosGovData(
   anoContrato?: string | number
 ): Promise<{ contratoId?: number; orgaoNome?: string; items: any[] }> {
   const numeroAno = formatNumeroAnoContrato(numeroContrato, anoContrato);
-  if (!uasg || !numeroAno) return { items: [] };
+  if (!numeroAno) return { items: [] };
 
-  try {
-    const listRes = await fetch(`/api-contratos-gov/api/contrato/ugorigem/${uasg}/numeroano/${numeroAno}`);
-    if (listRes.ok) {
-      const data = await listRes.json();
-      const cObj = Array.isArray(data) ? data[0] : data;
-      const contratoId = cObj?.id || cObj?.contrato_id;
-      const orgaoNome = cObj?.contratante?.orgao?.nome || cObj?.contratante?.orgao_origem?.nome;
+  const candidateUgs = Array.from(new Set([uasg, '200331', '200330'])).filter(Boolean);
 
-      if (contratoId) {
-        const itemsRes = await fetch(`/api-contratos-gov/api/contrato/${contratoId}/itens`);
-        const itemsData = itemsRes.ok ? await itemsRes.json() : [];
-        return {
-          contratoId,
-          orgaoNome,
-          items: Array.isArray(itemsData) ? itemsData : []
-        };
+  for (const ug of candidateUgs) {
+    try {
+      const listRes = await fetch(`/api-contratos-gov/api/contrato/ugorigem/${ug}/numeroano/${numeroAno}`);
+      if (listRes.ok) {
+        const data = await listRes.json();
+        const cObj = Array.isArray(data) ? data[0] : data;
+        const contratoId = cObj?.id || cObj?.contrato_id;
+        const orgaoNome = cObj?.contratante?.orgao?.nome || cObj?.contratante?.orgao_origem?.nome;
+
+        if (contratoId) {
+          const itemsRes = await fetch(`/api-contratos-gov/api/contrato/${contratoId}/itens`);
+          const itemsData = itemsRes.ok ? await itemsRes.json() : [];
+          return {
+            contratoId,
+            orgaoNome,
+            items: Array.isArray(itemsData) ? itemsData : []
+          };
+        }
       }
+    } catch (e) {
+      console.warn(`Falha na consulta ao Contratos.gov.br (ug=${ug}, numAno=${numeroAno})`, e);
     }
-  } catch (e) {
-    console.warn(`Falha na consulta ao Contratos.gov.br (ug=${uasg}, numAno=${numeroAno})`, e);
   }
 
   return { items: [] };
@@ -1063,6 +1068,50 @@ export async function fetchComprasGovContratosByPurchase(
       } catch (e) {
         console.warn(`Falha na busca de contratos em lote no modulo-contratos para a UG ${uasg} e ano ${yr}`, e);
       }
+    }
+  }
+
+  // 3. Buscar diretamente na API do Contratos.gov.br (/api/contrato/ug/{uasg})
+  for (const uasg of candidateUasgs) {
+    try {
+      let ugContratos = contratosGovUgListCache.get(uasg);
+      if (!ugContratos) {
+        const res = await fetch(`/api-contratos-gov/api/contrato/ug/${uasg}`);
+        if (res.ok) {
+          ugContratos = await res.json();
+          contratosGovUgListCache.set(uasg, ugContratos || []);
+        }
+      }
+      if (Array.isArray(ugContratos)) {
+        const cleanParamsNum = (params.numeroCompra || '').replace(/\D/g, '').replace(/^0+/, '');
+        for (const c of ugContratos) {
+          let matched = false;
+          const cleanLic = (c.licitacao_numero || '').replace(/\D/g, '').replace(/^0+/, '');
+          if (cleanParamsNum && cleanLic && (cleanLic === cleanParamsNum || cleanLic.includes(cleanParamsNum) || cleanParamsNum.includes(cleanLic))) {
+            matched = true;
+          }
+          if (matched) {
+            const canKey = getCanonicalContractKey(c.numero, c.ano || (c.data_assinatura ? c.data_assinatura.split('-')[0] : '2025'));
+            if (canKey && !contractsMap.has(canKey)) {
+              contractsMap.set(canKey, {
+                numeroContrato: c.numero,
+                anoContrato: c.ano || (c.data_assinatura ? c.data_assinatura.split('-')[0] : '2025'),
+                codigoUnidadeGestora: c.unidade_gestora || uasg,
+                codigoUnidadeGestoraOrigemContrato: uasg,
+                objeto: c.objeto,
+                niFornecedor: c.fornecedor?.cnpj_cpf_idgener,
+                nomeRazaoSocialFornecedor: c.fornecedor?.nome,
+                contrato_id: c.id,
+                valor_global: c.valor_global,
+                dataVigenciaInicial: c.vigencia_inicio,
+                dataVigenciaFinal: c.vigencia_fim
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`Falha na consulta de contratos na API Contratos.gov.br para UG ${uasg}`, err);
     }
   }
 
