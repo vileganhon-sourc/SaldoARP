@@ -324,8 +324,8 @@ export async function enrichArpsBatchWithPncpVigencia(
 export const SUPPLEMENTAL_PNCP_ATAS = [
   { anoCompra: '2025', seqCompra: 1102, seqAta: 1, numeroAta: '00069/2025' },
   { anoCompra: '2025', seqCompra: 1576, seqAta: 2, numeroAta: '00023/2026' },
-  { anoCompra: '2025', seqCompra: 1665, seqAta: 1, numeroAta: '00039/2026' },
-  { anoCompra: '2025', seqCompra: 1665, seqAta: 2, numeroAta: '00040/2026' },
+  { anoCompra: '2025', seqCompra: 1665, seqAta: 1, numeroAta: '00039/2026', cnpjFornecedor: '03871566000349' },
+  { anoCompra: '2025', seqCompra: 1665, seqAta: 2, numeroAta: '00040/2026', cnpjFornecedor: '03622266000164' },
   { anoCompra: '2025', seqCompra: 1331, seqAta: 1, numeroAta: '00041/2026' }
 ];
 
@@ -349,6 +349,10 @@ export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<Ar
           const numAta = String(d.numeroAtaRegistroPreco || item.numeroAta.split('/')[0]).padStart(5, '0');
           const fullNumAta = `${numAta}/${anoAta}`;
 
+          // Obter itens específicos da Ata para calcular valorTotal e quantidadeItens exatos
+          const itemsOfAta = await fetchPncpCompraItems(item.anoCompra, item.seqCompra, fullNumAta, '200331', item.cnpjFornecedor);
+          const totalVal = itemsOfAta.reduce((acc, it) => acc + (it.valorTotal || 0), 0);
+
           const arpRec: ArpRecord = {
             numeroAtaRegistroPreco: fullNumAta,
             codigoUnidadeGerenciadora: d.unidadeOrgao?.codigoUnidade || '200331',
@@ -364,10 +368,10 @@ export async function fetchSupplementalPncpArps(targetUasg?: string): Promise<Ar
             dataAssinatura: d.dataAssinatura || '',
             dataVigenciaInicial: d.dataVigenciaInicio || '',
             dataVigenciaFinal: d.dataVigenciaFim || '',
-            valorTotal: 0,
+            valorTotal: totalVal,
             statusAta: 'Ata de Registro de Preços',
             objeto: d.objetoCompra || '',
-            quantidadeItens: 1,
+            quantidadeItens: itemsOfAta.length || 1,
             dataHoraAtualizacao: d.dataAtualizacao || '',
             dataHoraInclusao: d.dataInclusao || '',
             dataHoraExclusao: null,
@@ -396,9 +400,11 @@ export async function fetchPncpCompraItems(
   anoCompra: string,
   seqCompra: number | string,
   numeroAta: string,
-  uasg: string
+  uasg: string,
+  targetSupplierCnpj?: string
 ): Promise<ArpItemRecord[]> {
-  const cacheKey = `${anoCompra}-${seqCompra}-${numeroAta}-${uasg}`;
+  const cleanTargetCnpj = (targetSupplierCnpj || '').replace(/\D/g, '');
+  const cacheKey = `${anoCompra}-${seqCompra}-${numeroAta}-${uasg}-${cleanTargetCnpj}`;
   if (pncpCompraItemsCache.has(cacheKey)) {
     return pncpCompraItemsCache.get(cacheKey)!;
   }
@@ -449,6 +455,7 @@ export async function fetchPncpCompraItems(
           descricaoItem: it.descricao || '',
           tipoItem: it.materialOuServicoNome || 'Material',
           quantidadeHomologadaItem: quantidadeHomologada,
+          quantidadeEstimadaEdital: it.quantidade || quantidadeHomologada,
           classificacaoFornecedor: '001',
           niFornecedor: niFornecedor,
           nomeRazaoSocialFornecedor: nomeRazaoSocialFornecedor,
@@ -458,6 +465,9 @@ export async function fetchPncpCompraItems(
           maximoAdesao: 0,
           nomeUnidadeGerenciadora: 'SECRETARIA NACIONAL DE SEGURANCA PUBLICA - SENASP',
           nomeModalidadeCompra: 'Pregão',
+          termoHomologacao: '',
+          isCancelado: false,
+          isSuspenso: false,
           idCompra: `20033105${seqCompra}${anoCompra}`,
           numeroControlePncpCompra: `${cnpj}-1-${String(seqCompra).padStart(6, '0')}/${anoCompra}`,
           dataHoraInclusao: it.dataInclusao || '',
@@ -469,8 +479,7 @@ export async function fetchPncpCompraItems(
           itemExcluido: false,
           numeroControlePncpAta: '',
           codigoPdm: 0,
-          nomePdm: it.descricao || '',
-          quantidadeEstimadaEdital: it.quantidade || quantidadeHomologada
+          nomePdm: it.descricao || ''
         } as ArpItemRecord;
       })
     );
@@ -553,7 +562,7 @@ export async function fetchArpItems(
         return sNum === cleanTargetAta;
       });
       if (supp) {
-        foundItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, numeroAtaRegistroPreco, codigoUnidadeGerenciadora);
+        foundItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, numeroAtaRegistroPreco, codigoUnidadeGerenciadora, supp.cnpjFornecedor);
       }
     }
 
@@ -643,7 +652,7 @@ export async function fetchArpItemsBatch(params: FilterParams): Promise<Record<s
       if (sArp) {
         const key = `${sArp.numeroAtaRegistroPreco}-${sArp.codigoUnidadeGerenciadora}`;
         if (!itemsMap[key] || itemsMap[key].length === 0) {
-          const suppItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, sArp.numeroAtaRegistroPreco, sArp.codigoUnidadeGerenciadora);
+          const suppItems = await fetchPncpCompraItems(supp.anoCompra, supp.seqCompra, sArp.numeroAtaRegistroPreco, sArp.codigoUnidadeGerenciadora, supp.cnpjFornecedor);
           if (suppItems.length > 0) {
             itemsMap[key] = suppItems;
           }
