@@ -256,11 +256,12 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
         if (key && key.startsWith('saldoarp-allocations-')) {
           const storedAllocations = JSON.parse(localStorage.getItem(key) || '[]');
           if (storedAllocations.length > 0) {
-            const keyParts = key.split('-');
+            const rawKey = key.replace('saldoarp-allocations-', '');
+            const keyParts = rawKey.split('-');
             const numeroItem = keyParts[keyParts.length - 1] || '';
             const uasg = keyParts[keyParts.length - 2] || '';
             
-            const ataParts = keyParts.slice(2, keyParts.length - 2);
+            const ataParts = keyParts.slice(0, keyParts.length - 2);
             let numeroAta = ataParts.join('-');
             
             if (!numeroAta.includes('/') && numeroAta.length > 5) {
@@ -270,30 +271,67 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
               }
             }
 
-            const isAtaInFilteredList = filteredList.some(
-              arp => arp.numeroAtaRegistroPreco === numeroAta && arp.codigoUnidadeGerenciadora === uasg
-            );
+            const targetItemNum = parseInt(numeroItem, 10);
+            const cleanAta = numeroAta.replace(/\D/g, '');
 
-            if (!isAtaInFilteredList) {
-              continue;
+            // Localiza preço unitário do item em itemsByAta
+            let unitPrice = 0;
+            for (const ataKey in itemsByAta) {
+              const items = itemsByAta[ataKey] || [];
+              for (const it of items) {
+                const itNum = parseInt(it.numeroItem, 10);
+                if (itNum === targetItemNum || it.numeroItem === numeroItem) {
+                  const itAtaClean = (it.numeroAtaRegistroPreco || '').replace(/\D/g, '');
+                  if (!cleanAta || it.numeroAtaRegistroPreco === numeroAta || (cleanAta && itAtaClean.includes(cleanAta)) || (itAtaClean && cleanAta.includes(itAtaClean))) {
+                    if (it.valorUnitario && Number(it.valorUnitario) > 0) {
+                      unitPrice = Number(it.valorUnitario);
+                      break;
+                    }
+                  }
+                }
+              }
+              if (unitPrice > 0) break;
             }
 
-            let unitPrice = 0;
-            const metaStored = localStorage.getItem(`saldoarp-item-meta-${numeroAta}-${numeroItem}`);
-            if (metaStored) {
-              try {
-                unitPrice = JSON.parse(metaStored).valorUnitario || 0;
-              } catch {
-                // Ignorar erro
+            // Fallback nos itens da lista de ARPs
+            if (!unitPrice) {
+              const matchedArp = filteredList.find(a => 
+                (cleanAta && a.numeroAtaRegistroPreco.replace(/\D/g, '') === cleanAta) ||
+                a.numeroAtaRegistroPreco === numeroAta
+              );
+              if (matchedArp && matchedArp.valorTotal > 0 && matchedArp.quantidadeItens > 0) {
+                unitPrice = matchedArp.valorTotal / matchedArp.quantidadeItens;
+              }
+            }
+
+            // Fallback nos metadados do localStorage
+            if (!unitPrice) {
+              const metaKeys = [
+                `saldoarp-item-meta-${numeroAta}-${numeroItem}`,
+                `saldoarp-item-meta-${rawKey}`,
+                `saldoarp-item-meta-${numeroAta}-${uasg}-${numeroItem}`
+              ];
+              for (const mKey of metaKeys) {
+                const metaStored = localStorage.getItem(mKey);
+                if (metaStored) {
+                  try {
+                    const parsed = JSON.parse(metaStored);
+                    if (parsed.valorUnitario && Number(parsed.valorUnitario) > 0) {
+                      unitPrice = Number(parsed.valorUnitario);
+                      break;
+                    }
+                  } catch {}
+                }
               }
             }
 
             storedAllocations.forEach((alloc: any) => {
               itemsAlocados.add(`${numeroAta}-${numeroItem}`);
-              const empQty = alloc.empenhadaQty || 0;
+              const empQty = Number(alloc.empenhadaQty) || 0;
+              const allocQty = Number(alloc.allocatedQty) || 0;
 
-              totalAllocatedQty += alloc.allocatedQty;
-              totalAllocatedValue += alloc.allocatedQty * unitPrice;
+              totalAllocatedQty += allocQty;
+              totalAllocatedValue += allocQty * unitPrice;
               totalEmpenhadaQty += empQty;
               totalEmpenhadaValue += empQty * unitPrice;
 
@@ -302,9 +340,9 @@ export const ArpSearch: React.FC<ArpSearchProps> = ({ onSelectArp, onSelectItem,
                 deptStats[dept] = { unitName: dept, count: 0, allocatedQty: 0, empenhadaQty: 0, value: 0 };
               }
               deptStats[dept].count += 1;
-              deptStats[dept].allocatedQty += alloc.allocatedQty;
+              deptStats[dept].allocatedQty += allocQty;
               deptStats[dept].empenhadaQty += empQty;
-              deptStats[dept].value += (alloc.allocatedQty - empQty) * unitPrice;
+              deptStats[dept].value += (allocQty - empQty) * unitPrice;
             });
           }
         }

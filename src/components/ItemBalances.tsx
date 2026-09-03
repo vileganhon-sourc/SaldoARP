@@ -684,6 +684,11 @@ export const ItemBalances: React.FC<ItemBalancesProps> = ({ arp, item, onBack })
   useEffect(() => {
     cacheArpsInDb([arp]);
     cacheArpItemsInDb(arp.numeroAtaRegistroPreco, arp.codigoUnidadeGerenciadora, [item]);
+    try {
+      const meta = JSON.stringify({ valorUnitario: item.valorUnitario, descricaoItem: item.descricaoItem });
+      localStorage.setItem(`saldoarp-item-meta-${arp.numeroAtaRegistroPreco}-${item.numeroItem}`, meta);
+      localStorage.setItem(`saldoarp-item-meta-${arp.numeroAtaRegistroPreco}-${arp.codigoUnidadeGerenciadora}-${item.numeroItem}`, meta);
+    } catch {}
     loadUnidades();
     loadEmpenhos();
     loadContracts();
