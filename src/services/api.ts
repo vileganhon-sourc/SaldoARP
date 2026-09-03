@@ -483,8 +483,14 @@ export async function fetchPncpCompraItems(
         } as ArpItemRecord;
       })
     );
-    pncpCompraItemsCache.set(cacheKey, arpItems);
-    return arpItems;
+
+    let filteredItems = arpItems;
+    if (cleanTargetCnpj) {
+      filteredItems = arpItems.filter(item => (item.niFornecedor || '').replace(/\D/g, '') === cleanTargetCnpj);
+    }
+
+    pncpCompraItemsCache.set(cacheKey, filteredItems);
+    return filteredItems;
   } catch (e) {
     console.warn(`Erro ao carregar itens da compra ${seqCompra}/${anoCompra} no PNCP:`, e);
     return [];
