@@ -1,4 +1,5 @@
 import React from 'react';
+import { CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import type { ArpRecord, AdesaoStatusType } from '../../types';
 import { AdesaoStatusBadge } from './AdesaoStatusBadge';
 
@@ -18,6 +19,16 @@ function formatCnpjDisplay(cnpj?: string): string {
   return cnpj;
 }
 
+function formatDateBR(dateStr?: string): string {
+  if (!dateStr) return '';
+  const clean = dateStr.split('T')[0];
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+}
+
 export const AtaCardHeader: React.FC<AtaCardHeaderProps> = ({
   arp,
   fornecedorNome,
@@ -26,18 +37,57 @@ export const AtaCardHeader: React.FC<AtaCardHeaderProps> = ({
 }) => {
   // Format: "ATA 00017/2026"
   const rawNum = arp.numeroAtaRegistroPreco || '';
-  const ataDisplay = rawNum.toUpperCase().startsWith('ATA') 
-    ? rawNum.toUpperCase() 
-    : `ATA ${rawNum}`;
+  const cleanAta = rawNum.replace(/^ATA\s+/i, '');
+  const ataDisplay = `ATA ${cleanAta}`;
 
   const formattedCnpj = formatCnpjDisplay(fornecedorCnpj);
+
+  const today = new Date();
+  const ninetyDaysFromNow = new Date();
+  ninetyDaysFromNow.setDate(today.getDate() + 90);
+
+  const vigenciaFinalDate = arp.dataVigenciaFinal ? new Date(arp.dataVigenciaFinal) : undefined;
+  const isExpired = !!(arp.isCanceladaPncp || (vigenciaFinalDate && vigenciaFinalDate < today));
+  const isExpiringSoon = !isExpired && !!(vigenciaFinalDate && vigenciaFinalDate <= ninetyDaysFromNow);
 
   return (
     <header className="ata-card-header">
       <div className="ata-card-header-left">
-        <h3 className="ata-card-number">{ataDisplay}</h3>
-        <p className="ata-card-supplier" title={formattedCnpj ? `${fornecedorNome} (${formattedCnpj})` : fornecedorNome}>
-          <span>{fornecedorNome}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <h3 className="ata-card-number">{ataDisplay}</h3>
+
+          {isExpired ? (
+            <span 
+              className="badge danger" 
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '0.15rem 0.5rem', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 700, backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#dc2626' }}
+            >
+              <AlertTriangle size={12} /> EXPIRADA
+            </span>
+          ) : isExpiringSoon ? (
+            <span 
+              className="badge warning" 
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '0.15rem 0.5rem', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 700, backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}
+            >
+              <Clock size={12} /> VENCE EM &lt; 90 DIAS
+            </span>
+          ) : (
+            <span 
+              className="badge success" 
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '0.15rem 0.5rem', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 700, backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#059669' }}
+            >
+              <CheckCircle2 size={12} /> VIGENTE
+            </span>
+          )}
+
+          {arp.dataVigenciaFinal && (
+            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 500 }}>
+              Vigência até: <strong style={{ color: '#334155' }}>{formatDateBR(arp.dataVigenciaFinal)}</strong>
+            </span>
+          )}
+        </div>
+
+        <p className="ata-card-supplier" title={formattedCnpj ? `${fornecedorNome} (${formattedCnpj})` : fornecedorNome} style={{ marginTop: '0.25rem' }}>
+          <span>Fornecedor: <strong>{fornecedorNome}</strong></span>
           {formattedCnpj && (
             <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 500, marginLeft: '0.5rem' }}>
               • CNPJ: {formattedCnpj}
