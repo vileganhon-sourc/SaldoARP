@@ -499,6 +499,7 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
     let totalAllocatedQty = 0;
     let totalSaldoQty = 0;
     const uniqueAtas = new Set<string>();
+    const uniqueItems = new Set<string>();
 
     filteredItems.forEach(i => {
       totalAllocatedValue += i.allocatedValue;
@@ -507,6 +508,7 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
       totalAllocatedQty += i.allocatedQty;
       totalSaldoQty += i.saldoQty;
       uniqueAtas.add(i.numeroAta);
+      uniqueItems.add(`${i.numeroAta}-${i.numeroItem}`);
     });
 
     const percentAvailable = totalAllocatedQty > 0 
@@ -521,7 +523,7 @@ export const InternalAllocationsDashboard: React.FC<InternalAllocationsDashboard
       totalSaldoQty,
       percentAvailable,
       atasCount: uniqueAtas.size,
-      itemsCount: filteredItems.length
+      itemsCount: uniqueItems.size
     };
   }, [filteredItems]);
 
