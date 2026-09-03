@@ -9,6 +9,15 @@ interface AtaCardHeaderProps {
   adesaoStatus: AdesaoStatusType;
 }
 
+function formatCnpjDisplay(cnpj?: string): string {
+  if (!cnpj) return '';
+  const digits = cnpj.replace(/\D/g, '');
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  return cnpj;
+}
+
 export const AtaCardHeader: React.FC<AtaCardHeaderProps> = ({
   arp,
   fornecedorNome,
@@ -21,12 +30,19 @@ export const AtaCardHeader: React.FC<AtaCardHeaderProps> = ({
     ? rawNum.toUpperCase() 
     : `ATA ${rawNum}`;
 
+  const formattedCnpj = formatCnpjDisplay(fornecedorCnpj);
+
   return (
     <header className="ata-card-header">
       <div className="ata-card-header-left">
         <h3 className="ata-card-number">{ataDisplay}</h3>
-        <p className="ata-card-supplier" title={fornecedorCnpj ? `${fornecedorNome} (${fornecedorCnpj})` : fornecedorNome}>
-          {fornecedorNome}
+        <p className="ata-card-supplier" title={formattedCnpj ? `${fornecedorNome} (${formattedCnpj})` : fornecedorNome}>
+          <span>{fornecedorNome}</span>
+          {formattedCnpj && (
+            <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 500, marginLeft: '0.5rem' }}>
+              • CNPJ: {formattedCnpj}
+            </span>
+          )}
         </p>
       </div>
 
