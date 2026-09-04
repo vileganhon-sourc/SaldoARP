@@ -85,3 +85,62 @@ export interface DbAlocacaoInterna {
   updated_at?: string;
 }
 
+export interface DbEmpenhoManual {
+  id: string;
+  item_key: string;
+  numero: string;
+  ano: number;
+  arp_id: string;
+  item_id: string;
+  uasg: string;
+  quantidade: number;
+  valor_unitario?: number | null;
+  valor_total?: number | null;
+  data?: string | null;
+  fornecedor?: string | null;
+  cnpj_fornecedor?: string | null;
+  unidade_interna_id?: string | null;
+  observacao?: string | null;
+  origem: string;
+  status: string;
+  criado_em?: string;
+  atualizado_em?: string;
+}
+
+export interface DbContratoManual {
+  id: string;
+  item_key: string;
+  numero: string;
+  ano: number;
+  arp_id: string;
+  item_id?: string | null;
+  uasg: string;
+  numero_controle_pncp?: string | null;
+  link_pncp?: string | null;
+  fornecedor?: string | null;
+  cnpj_fornecedor?: string | null;
+  objeto?: string | null;
+  quantidade_contratada?: number | null;
+  valor_total?: number | null;
+  origem: string;
+  criado_em?: string;
+  atualizado_em?: string;
+}
+
+export interface DbContratoEmpenhoLink {
+  id: string;
+  item_key: string;
+  contrato_id: string;
+  empenho_id: string;
+  quantidade_vinculada?: number | null;
+  data_vinculo?: string;
+  origem: string;
+}
+
+export interface DbEmpenhoManualQuantidade {
+  item_key: string;
+  emp_key: string;
+  quantidade: number;
+}
+
+
