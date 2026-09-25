@@ -367,11 +367,33 @@ export interface Empenho {
   atualizadoEm: string;
 }
 
+/**
+ * Tipos de Instrumentos Contratuais e Substitutivos (Art. 95 da Lei 14.133/2021)
+ *
+ * O instrumento de contrato é obrigatório, salvo hipóteses do art. 95 onde pode ser substituído
+ * por carta-contrato, nota de empenho de despesa, autorização de compra ou ordem de execução de serviço.
+ */
+export type TipoInstrumentoContratual =
+  | 'TERMO_CONTRATO'           // Instrumento solene bilateral ordinário
+  | 'CARTA_CONTRATO'           // Instrumento substitutivo simplificado
+  | 'NOTA_EMPENHO'             // Instrumento substitutivo para compras com entrega imediata ou sem obrigações futuras
+  | 'AUTORIZACAO_COMPRA'       // Instrumento substitutivo simplificado
+  | 'ORDEM_EXECUCAO_SERVICO'   // Instrumento substitutivo simplificado
+  | 'OUTRO_INSTRUMENTO_HABIL'; // Demais hipóteses admitidas pelo art. 95
+
+/**
+ * Utilitário puro: identifica se o instrumento contratual é substitutivo (Art. 95, Lei 14.133/2021)
+ */
+export function isInstrumentoSubstitutivo(tipo?: TipoInstrumentoContratual): boolean {
+  return tipo !== undefined && tipo !== 'TERMO_CONTRATO';
+}
+
 export interface Contrato {
   id: string;
   numero: string;
   ano: number;
-  arpId: string;
+  arpId?: string; // Saneamento Fase 6.5: Opcional (contrato pode derivar de compra direta sem Ata)
+  tipoInstrumento?: TipoInstrumentoContratual;
   itemId?: string;
   uasg: string;
   numeroControlePncp?: string;
@@ -432,12 +454,54 @@ export interface ContractDashboardRecord {
   idCompra?: string;
   modalidadeCompra?: string;
   contratoId?: number | string;
-  fonteDados: 'Compras.gov.br' | 'Contratos.gov.br' | 'PNCP';
+  tipoInstrumento?: TipoInstrumentoContratual;
+  arpId?: string;
+  fonteDados: 'Compras.gov.br' | 'Contratos.gov.br' | 'PNCP' | 'Sistema SaldoARP (Manual)' | string;
+  // Metadados de Origem e Rastreabilidade de Sincronização (Fase 1)
+  sourceSystem?: 'Compras.gov.br' | 'Contratos.gov.br' | 'PNCP' | 'SaldoARP' | string;
+  sourceRecordId?: string | number;
+  sourceUpdatedAt?: string;
+  lastSyncedAt?: string;
+  origem?: OrigemRegistro;
   itensCount?: number;
   empenhosCount?: number;
   linkPncp?: string;
   raw?: any;
 }
+
+/** Campos de autoridade da API governamental (não editáveis diretamente pelo usuário) */
+export const OFFICIAL_CONTRACT_FIELDS = [
+  'numero',
+  'ano',
+  'uasg',
+  'nomeUnidadeGestora',
+  'codigoOrgao',
+  'nomeOrgao',
+  'objeto',
+  'processo',
+  'fornecedorNome',
+  'fornecedorCnpjCpf',
+  'valorGlobal',
+  'valorInicial',
+  'dataAssinatura',
+  'dataVigenciaInicio',
+  'dataVigenciaFim',
+  'numeroControlePncp',
+  'idCompra',
+  'modalidadeCompra',
+  'contratoId',
+  'fonteDados',
+  'linkPncp'
+] as const;
+
+/** Campos de gestão operacional interna do SaldoARP (preservados em sincronizações oficiais) */
+export const INTERNAL_CONTRACT_FIELDS = [
+  'gestorNome',
+  'planoTarefas',
+  'observacoes',
+  'prioridade',
+  'processoSeiId'
+] as const;
 
 export interface ContractFilterParams {
   uasg: string;
@@ -485,3 +549,122 @@ export interface ContractDetailEmpenho {
   [key: string]: any;
 }
 
+// -------------------------------------------------------------
+// Gestão de Contratos: Gestor, Templates e Plano de Tarefas
+// -------------------------------------------------------------
+export type ContractTaskStatusValue = 'PENDENTE' | 'EM_ANDAMENTO' | 'CONCLUIDA' | 'NAO_APLICAVEL';
+
+/**
+ * Semântica de Execução de Tarefas (SaldoARP — Fase 4.3C)
+ * Princípio: "DIGITE UMA VEZ, USE EM TODO LUGAR"
+ */
+export type TaskExecutionMode =
+  | 'INTERNA'       // Trabalho intelectual/administrativo executado pela equipe no SaldoARP ou no SEI
+  | 'EXTERNA'       // Ação necessária em sistema governamental terceiro (Contratos.gov.br, SICAF, Mediador MTE, SEI)
+  | 'AUTOMATICA'    // Processamento computado diretamente pelo SaldoARP (limites 25%/50%, índices, prazos)
+  | 'CONFIRMACAO';  // Conciliação e captura de fato oficial retornado pelas APIs governamentais soberanas
+
+export interface ContractManager {
+  contractKey: string;
+  uasg: string;
+  numero: string;
+  ano: number;
+  gestorNome: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContractTaskTemplateTask {
+  id: string;
+  macrotaskId: string;
+  nome: string;
+  ordem: number;
+  executionMode?: TaskExecutionMode;
+  sistemaDestino?: string;
+  externalLinkUrl?: string;
+}
+
+export interface ContractTaskTemplateMacrotask {
+  id: string;
+  templateId: string;
+  nome: string;
+  ordem: number;
+  tarefas: ContractTaskTemplateTask[];
+}
+
+export interface ContractTaskTemplate {
+  id: string;
+  nome: string;
+  descricao?: string;
+  ativo: boolean;
+  createdAt: string;
+  updatedAt: string;
+  macrotarefas: ContractTaskTemplateMacrotask[];
+}
+
+export interface ContractTask {
+  id: string;
+  macrotaskId: string;
+  nome: string;
+  ordem: number;
+  status: ContractTaskStatusValue;
+  executionMode?: TaskExecutionMode;
+  sistemaDestino?: string;
+  externalLinkUrl?: string;
+  responsavelNome?: string;
+  prazo?: string;
+  observacao?: string;
+  criadoEm: string;
+  atualizadoEm: string;
+  concluidoEm?: string;
+  concluidoPor?: string;
+}
+
+export interface ContractTaskMacrotask {
+  id: string;
+  planId: string;
+  nome: string;
+  ordem: number;
+  tarefas: ContractTask[];
+}
+
+export interface ContractTaskPlanProgress {
+  total: number;
+  concluidas: number;
+  pendentes: number;
+  emAndamento: number;
+  naoAplicaveis: number;
+  atrasadas: number;
+  percentual: number;
+}
+
+export interface ContractTaskPlan {
+  id: string;
+  contractKey: string;
+  uasg: string;
+  numero: string;
+  ano: number;
+  templateId?: string;
+  templateNome: string;
+  appliedAt: string;
+  macrotarefas: ContractTaskMacrotask[];
+  progresso: ContractTaskPlanProgress;
+}
+
+// -------------------------------------------------------------
+// Gestão de Eventos e Ciclos Contratuais (Fase 4)
+// -------------------------------------------------------------
+export * from './contractEvents';
+export * from './contractProrrogation';
+export * from './contractAmendments';
+export * from './contractAmendmentWorkflows';
+export * from './contractExtinctions';
+export * from './contractClosureWorkflows';
+export * from './contractRescissionWorkflows';
+export * from './arpContractLinks';
+export * from './ataEvents';
+export * from './financialExecution';
+export * from './paymentFollowUp';
+export * from './contractValueEvolution';
+export * from './contractReajusteRadar';
+export * from './managementDashboard';

@@ -11,23 +11,24 @@ import {
   CheckCircle2,
   Loader2
 } from 'lucide-react';
-import { useDepartments } from '../hooks/useDepartments';
-import { useSaveDepartment } from '../hooks/useSaveDepartment';
-import { useDeleteDepartment } from '../hooks/useDeleteDepartment';
-import { useMergeDepartment } from '../hooks/useMergeDepartment';
-import type { InternalDepartment } from '../services/unitService';
-import { fetchAllAllocationsGlobal } from '../services/allocationService';
+import { useDepartments } from '../../hooks/useDepartments';
+import { useSaveDepartment } from '../../hooks/useSaveDepartment';
+import { useDeleteDepartment } from '../../hooks/useDeleteDepartment';
+import { useMergeDepartment } from '../../hooks/useMergeDepartment';
+import type { InternalDepartment } from '../../services/unitService';
+import { fetchAllAllocationsGlobal } from '../../services/allocationService';
+import { AppButton } from '../../design-system/components/AppButton';
 
-interface ManageDepartmentsModalProps {
+interface InternalUnitsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onDepartmentsUpdated?: () => void;
+  onUnitsUpdated?: () => void;
 }
 
-export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
+export const InternalUnitsModal: React.FC<InternalUnitsModalProps> = ({
   isOpen,
   onClose,
-  onDepartmentsUpdated
+  onUnitsUpdated
 }) => {
   const { data: departments = [], isLoading: isDepartmentsLoading, refetch } = useDepartments();
   const saveMutation = useSaveDepartment();
@@ -40,7 +41,7 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Detecção de nomes legados ou com erros de digitação (ex: "DFNSPdddd")
+  // Detecção de registros legados ou variações com erro de digitação
   const [legacyNames, setLegacyNames] = useState<string[]>([]);
   const [mergeTargets, setMergeTargets] = useState<Record<string, string>>({});
 
@@ -70,7 +71,6 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
       const unknownList = Array.from(unknownNames);
       setLegacyNames(unknownList);
 
-      // Prepara alvos padrão para mesclagem
       const initialTargets: Record<string, string> = {};
       unknownList.forEach(u => {
         const match = currentDeps.find(d => 
@@ -81,7 +81,7 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
       });
       setMergeTargets(initialTargets);
     } catch (e) {
-      console.warn('Erro ao detectar alocações legadas:', e);
+      console.warn('Erro ao detectar alocações com siglas legadas:', e);
     }
   };
 
@@ -96,12 +96,12 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
     const cleanNome = nomeCompleto.trim();
 
     if (!cleanSigla) {
-      setError('A sigla da unidade é obrigatória (Ex: DFNSP).');
+      setError('A sigla da unidade é obrigatória (Ex: DFNSP, DSUSP, CGOE).');
       return;
     }
 
     if (!cleanNome) {
-      setError('O nome completo da unidade é obrigatório.');
+      setError('O nome completo da unidade / diretoria / coordenação é obrigatório.');
       return;
     }
 
@@ -109,7 +109,8 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
       await saveMutation.mutateAsync({
         id: editingId || undefined,
         sigla: cleanSigla,
-        nomeCompleto: cleanNome
+        nomeCompleto: cleanNome,
+        ativo: true
       });
 
       setSuccessMsg(
@@ -120,9 +121,9 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
       setEditingId(null);
       setSigla('');
       setNomeCompleto('');
-      if (onDepartmentsUpdated) onDepartmentsUpdated();
+      if (onUnitsUpdated) onUnitsUpdated();
     } catch (err: any) {
-      setError(err.message || 'Erro ao salvar unidade.');
+      setError(err.message || 'Erro ao salvar unidade interna.');
     }
   };
 
@@ -131,10 +132,11 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
     setSigla(dep.sigla);
     setNomeCompleto(dep.nomeCompleto);
     setError(null);
+    setSuccessMsg(null);
   };
 
   const handleDelete = async (id: string, depSigla: string) => {
-    if (!confirm(`Tem certeza que deseja excluir a unidade "${depSigla}" do cadastro oficial?`)) {
+    if (!window.confirm(`Tem certeza que deseja inativar/excluir a unidade interna "${depSigla}"?`)) {
       return;
     }
 
@@ -148,17 +150,17 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
       } else if (res.deactivated) {
         setSuccessMsg(`Unidade "${depSigla}" desativada com sucesso.`);
       }
-      if (onDepartmentsUpdated) onDepartmentsUpdated();
+      if (onUnitsUpdated) onUnitsUpdated();
     } catch (err: any) {
       if (err.code === 'CANNOT_DELETE_DEPARTMENT_WITH_ALLOCATIONS' || (err.sqlState === '23503')) {
-        const confirmDeactivate = confirm(
+        const confirmDeactivate = window.confirm(
           `A unidade "${depSigla}" possui alocações contábeis vinculadas e não pode ser excluída fisicamente.\n\nDeseja desativá-la para que não apareça em novas alocações, mantendo o histórico intacto?`
         );
         if (confirmDeactivate) {
           try {
             await deleteMutation.mutateAsync({ id, forceDeactivate: true });
             setSuccessMsg(`Unidade "${depSigla}" desativada com sucesso.`);
-            if (onDepartmentsUpdated) onDepartmentsUpdated();
+            if (onUnitsUpdated) onUnitsUpdated();
           } catch (deactErr: any) {
             setError(deactErr.message || 'Erro ao desativar unidade.');
           }
@@ -178,9 +180,9 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
 
     try {
       const res = await mergeMutation.mutateAsync({ oldName, targetSigla });
-      setSuccessMsg(`Higienização concluída! ${res.rows_updated} registros com "${oldName}" foram unificados em "${targetSigla}".`);
+      setSuccessMsg(`Higienização concluída! ${res.rows_updated} registro(s) com "${oldName}" foram unificados em "${targetSigla}".`);
       await refetch();
-      if (onDepartmentsUpdated) onDepartmentsUpdated();
+      if (onUnitsUpdated) onUnitsUpdated();
     } catch (err: any) {
       setError(err.message || 'Erro ao mesclar registros da unidade.');
     }
@@ -205,7 +207,7 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
         background: '#ffffff',
         borderRadius: '12px',
         width: '100%',
-        maxWidth: '750px',
+        maxWidth: '780px',
         maxHeight: '90vh',
         display: 'flex',
         flexDirection: 'column',
@@ -213,23 +215,23 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
         overflow: 'hidden'
       }}>
         
-        {/* Header */}
+        {/* Cabeçalho */}
         <div style={{
           padding: '1.25rem 1.5rem',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid #e2e8f0',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           background: '#f8fafc'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Building2 size={22} color="var(--primary)" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <Building2 size={24} color="#0c326f" />
             <div>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
-                Cadastro de Unidades e Departamentos Internos
+              <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0c326f', margin: 0 }}>
+                Gestão de Unidades Internas (SENASP)
               </h2>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-                Padronização das diretorias e coordenações oficiais da SENASP
+              <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, marginTop: '2px' }}>
+                Diretorias, coordenações-gerais e coordenações oficiais para controle e distribuição de cotas
               </p>
             </div>
           </div>
@@ -237,24 +239,25 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
             type="button" 
             onClick={onClose} 
             disabled={isSubmitting}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem' }}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b', padding: '0.25rem' }}
+            title="Fechar janela"
           >
             <X size={20} />
           </button>
         </div>
 
-        {/* Content Body */}
-        <div style={{ padding: '1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Corpo com Scroll */}
+        <div style={{ padding: '1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           
-          {/* Alerts */}
+          {/* Mensagens de Feedback */}
           {error && (
-            <div style={{ padding: '0.75rem 1rem', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ padding: '0.75rem 1rem', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #fecaca' }}>
               <AlertCircle size={16} /> {error}
             </div>
           )}
 
           {successMsg && (
-            <div style={{ padding: '0.75rem 1rem', background: 'var(--success-bg)', color: 'var(--success-text)', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ padding: '0.75rem 1rem', background: '#dcfce7', color: '#166534', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #bbf7d0' }}>
               <CheckCircle2 size={16} /> {successMsg}
             </div>
           )}
@@ -271,162 +274,166 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
               gap: '0.75rem'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#92400e', fontWeight: 700, fontSize: '0.85rem' }}>
-                <Sparkles size={16} /> Higienização de Registros Antigos / Nomes Digitados Incorretamente
+                <Sparkles size={16} /> Higienização de Registros Antigos / Nomes Incorretos
               </div>
               <p style={{ fontSize: '0.78rem', color: '#78350f', margin: 0 }}>
-                Encontramos registros de alocações antigas com nomes que não constam na lista oficial. Você pode mesclá-los com a unidade correta com 1 clique:
+                Encontramos registros de alocações com siglas que não constam no catálogo oficial. Você pode unificá-las com a unidade correta:
               </p>
               
               {legacyNames.map((name) => (
                 <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #fef3c7', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--danger)' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#dc2626' }}>
                     "{name}"
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>mesclar para:</span>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b' }}>mesclar para:</span>
                     <select
-                      className="form-input"
                       value={mergeTargets[name] || ''}
                       onChange={(e) => setMergeTargets({ ...mergeTargets, [name]: e.target.value })}
                       disabled={isSubmitting}
-                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', height: 'auto', width: 'auto', fontWeight: 700 }}
+                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 600 }}
                     >
                       {departments.map(d => (
                         <option key={d.id} value={d.sigla}>{d.sigla} - {d.nomeCompleto}</option>
                       ))}
                     </select>
-                    <button
+                    <AppButton
                       type="button"
+                      variant="primary"
+                      size="sm"
                       onClick={() => handleMerge(name)}
                       disabled={isSubmitting}
-                      className="btn btn-primary"
-                      style={{ padding: '0.3rem 0.75rem', fontSize: '0.78rem', height: 'auto' }}
+                      isLoading={mergeMutation.isPending}
                     >
-                      {mergeMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : 'Mesclar'}
-                    </button>
+                      Mesclar
+                    </AppButton>
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Form to Add / Edit Department */}
+          {/* Formulário de Cadastro / Edição */}
           <form onSubmit={handleSave} style={{
-            background: '#f8fafc',
-            border: '1px solid var(--border)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
             borderRadius: '8px',
             padding: '1.25rem',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
             display: 'flex',
             flexDirection: 'column',
             gap: '1rem'
           }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)' }}>
-              {editingId ? '✏️ Editar Unidade Oficial' : '+ Cadastrar Nova Unidade Oficial'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.92rem', fontWeight: 800, color: '#0c326f' }}>
+              {editingId ? <Edit2 size={16} color="#0c326f" /> : <Building2 size={16} color="#0c326f" />}
+              <span>{editingId ? 'Editar Unidade Interna' : 'Cadastrar Nova Unidade Interna'}</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: '0.75rem', alignItems: 'flex-end' }}>
-              <div className="form-group">
-                <label className="form-label" style={{ fontSize: '0.78rem' }}>Sigla / Código *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
+              <div>
+                <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem', display: 'block' }}>
+                  Sigla / Código *
+                </label>
                 <input
                   type="text"
-                  className="form-input"
-                  placeholder="Ex: DFNSP"
+                  placeholder="Ex: DFNSP, DSUSP, CGOE"
                   value={sigla}
                   onChange={(e) => setSigla(e.target.value.toUpperCase())}
                   disabled={isSubmitting}
                   required
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', width: '100%', outline: 'none' }}
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label" style={{ fontSize: '0.78rem' }}>Nome Completo / Diretoria *</label>
+              <div>
+                <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem', display: 'block' }}>
+                  Nome Completo / Diretoria / Coordenação *
+                </label>
                 <input
                   type="text"
-                  className="form-input"
                   placeholder="Ex: Diretoria da Força Nacional de Segurança Pública"
                   value={nomeCompleto}
                   onChange={(e) => setNomeCompleto(e.target.value)}
                   disabled={isSubmitting}
                   required
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', width: '100%', outline: 'none' }}
                 />
               </div>
+            </div>
 
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button 
-                  type="submit" 
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.25rem' }}>
+              {editingId && (
+                <AppButton
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setEditingId(null); setSigla(''); setNomeCompleto(''); }}
                   disabled={isSubmitting}
-                  className="btn btn-primary" 
-                  style={{ padding: '0.55rem 1rem', height: '40px', fontSize: '0.82rem' }}
                 >
-                  {saveMutation.isPending ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : editingId ? (
-                    <Check size={14} />
-                  ) : (
-                    <Plus size={14} />
-                  )}
-                  {' '}
-                  {editingId ? 'Salvar' : 'Adicionar'}
-                </button>
-                {editingId && (
-                  <button 
-                    type="button" 
-                    onClick={() => { setEditingId(null); setSigla(''); setNomeCompleto(''); }} 
-                    disabled={isSubmitting}
-                    className="btn btn-secondary" 
-                    style={{ padding: '0.55rem 0.75rem', height: '40px' }}
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
+                  Cancelar
+                </AppButton>
+              )}
+              <AppButton
+                type="submit"
+                variant="primary"
+                size="sm"
+                icon={saveMutation.isPending ? undefined : (editingId ? <Check size={14} /> : <Plus size={14} />)}
+                isLoading={saveMutation.isPending}
+                disabled={isSubmitting}
+              >
+                {editingId ? 'Salvar Alterações' : 'Adicionar Unidade'}
+              </AppButton>
             </div>
           </form>
 
-          {/* List of Registered Departments */}
+          {/* Lista de Unidades Internas */}
           <div>
-            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Unidades Disponíveis na Lista Suspensa ({departments.length})</span>
-              {isDepartmentsLoading && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Carregando...</span>}
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Unidades Internas Oficiais ({departments.length})</span>
+              {isDepartmentsLoading && (
+                <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <Loader2 size={12} className="animate-spin" /> Carregando...
+                </span>
+              )}
             </div>
 
-            <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-              <table className="custom-table" style={{ margin: 0 }}>
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                 <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ width: '130px', padding: '0.6rem 1rem' }}>SIGLA</th>
-                    <th style={{ padding: '0.6rem 1rem' }}>NOME COMPLETO</th>
-                    <th style={{ width: '90px', textAlign: 'center', padding: '0.6rem 1rem' }}>AÇÕES</th>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                    <th style={{ width: '140px', padding: '0.65rem 1rem' }}>SIGLA</th>
+                    <th style={{ padding: '0.65rem 1rem' }}>NOME COMPLETO / DIRETORIA</th>
+                    <th style={{ width: '90px', textAlign: 'center', padding: '0.65rem 1rem' }}>AÇÕES</th>
                   </tr>
                 </thead>
                 <tbody>
                   {departments.map((d) => (
-                    <tr key={d.id} style={{ borderBottom: '1px solid var(--border)', opacity: d.ativo ? 1 : 0.6 }}>
-                      <td style={{ padding: '0.65rem 1rem', fontWeight: 800, color: d.ativo ? 'var(--primary)' : 'var(--text-muted)' }}>
-                        {d.sigla} {!d.ativo && <span style={{ fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 600 }}>(Inativa)</span>}
+                    <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9', opacity: d.ativo ? 1 : 0.6 }}>
+                      <td style={{ padding: '0.65rem 1rem', fontWeight: 800, color: d.ativo ? '#0c326f' : '#64748b' }}>
+                        {d.sigla} {!d.ativo && <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>(Inativa)</span>}
                       </td>
-                      <td style={{ padding: '0.65rem 1rem', color: 'var(--text-main)', fontSize: '0.85rem' }}>
+                      <td style={{ padding: '0.65rem 1rem', color: '#334155' }}>
                         {d.nomeCompleto}
                       </td>
                       <td style={{ padding: '0.65rem 1rem', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                           <button
                             type="button"
                             onClick={() => handleEdit(d)}
                             disabled={isSubmitting}
-                            style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: isSubmitting ? 'not-allowed' : 'pointer', padding: '2px' }}
-                            title="Editar"
+                            style={{ background: 'transparent', border: 'none', color: '#0ea5e9', cursor: isSubmitting ? 'not-allowed' : 'pointer', padding: '2px' }}
+                            title="Editar unidade"
                           >
-                            <Edit2 size={14} />
+                            <Edit2 size={15} />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(d.id, d.sigla)}
                             disabled={isSubmitting}
-                            style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: isSubmitting ? 'not-allowed' : 'pointer', padding: '2px' }}
-                            title="Excluir / Desativar"
+                            style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: isSubmitting ? 'not-allowed' : 'pointer', padding: '2px' }}
+                            title="Inativar ou excluir unidade"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>
@@ -434,8 +441,8 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
                   ))}
                   {departments.length === 0 && !isDepartmentsLoading && (
                     <tr>
-                      <td colSpan={3} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                        Nenhuma unidade cadastrada.
+                      <td colSpan={3} style={{ textAlign: 'center', padding: '1.5rem', color: '#64748b' }}>
+                        Nenhuma unidade interna cadastrada.
                       </td>
                     </tr>
                   )}
@@ -446,17 +453,17 @@ export const ManageDepartmentsModal: React.FC<ManageDepartmentsModalProps> = ({
 
         </div>
 
-        {/* Footer */}
+        {/* Rodapé */}
         <div style={{
-          padding: '1rem 1.5rem',
-          borderTop: '1px solid var(--border)',
+          padding: '0.85rem 1.5rem',
+          borderTop: '1px solid #e2e8f0',
           display: 'flex',
           justifyContent: 'flex-end',
           background: '#f8fafc'
         }}>
-          <button type="button" onClick={onClose} disabled={isSubmitting} className="btn btn-secondary">
+          <AppButton type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Fechar
-          </button>
+          </AppButton>
         </div>
 
       </div>
